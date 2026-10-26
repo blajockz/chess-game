@@ -27,7 +27,13 @@ import {
 } from "./game/useClocks";
 import OnlineDialog from "./components/OnlineDialog";
 import { inviteLink, linkFromUrl, useOnline } from "./net/useOnline";
-import { FIRST_MOVE_MS, IDLE_GRACE_MS, IDLE_MS } from "../shared/protocol";
+import {
+  FIRST_MOVE_MS,
+  IDLE_QUIET_MS,
+  IDLE_WARNING_MS,
+  IDLE_WINDOW_MS,
+  formatWait,
+} from "../shared/protocol";
 
 const PRACTICE_OPPONENT = true;
 
@@ -213,14 +219,11 @@ export default function App() {
     const d = serverState?.deadline;
     if (d && u && !over) deadline = { kind: d.kind, side: d.side, at: u.at + d.in };
   } else if (started && !setupOpen && !over) {
-    deadline =
-      game.ply < 2
-        ? { kind: "abort", side: game.turn, at: turnSince + FIRST_MOVE_MS }
-        : {
-            kind: "idle",
-            side: game.turn,
-            at: Math.max(turnSince + IDLE_MS, startedAt + IDLE_GRACE_MS),
-          };
+    if (game.ply < 2) {
+      deadline = { kind: "abort", side: game.turn, at: turnSince + FIRST_MOVE_MS };
+    } else if (turnSince - startedAt < IDLE_WINDOW_MS) {
+      deadline = { kind: "idle", side: game.turn, at: turnSince + IDLE_QUIET_MS + IDLE_WARNING_MS };
+    }
   }
 
   useEffect(() => {
@@ -238,7 +241,7 @@ export default function App() {
     setEnded(
       deadline.kind === "abort"
         ? `Game aborted: ${who} didn't make a first move`
-        : `${winner} wins: ${who} didn't move for ${IDLE_MS / 1000} s`
+        : `${winner} wins: ${who} didn't move for ${formatWait(IDLE_QUIET_MS + IDLE_WARNING_MS)}`
     );
   }, [now]);
 
@@ -254,7 +257,7 @@ export default function App() {
       time: leftText,
       urgent: left <= 10_000,
     };
-  } else if (deadline?.kind === "idle" && left <= 20_000) {
+  } else if (deadline?.kind === "idle" && left <= IDLE_WARNING_MS) {
     deadlineInfo = {
       text: deadline.side === you ? "Move now, or you lose the game" : "Your opponent must move",
       time: leftText,

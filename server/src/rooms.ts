@@ -2,8 +2,10 @@ import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { Chess } from "chess.js";
 import {
   FIRST_MOVE_MS,
-  IDLE_GRACE_MS,
-  IDLE_MS,
+  IDLE_QUIET_MS,
+  IDLE_WARNING_MS,
+  IDLE_WINDOW_MS,
+  formatWait,
   INVITE_TTL_MS,
   ROOM_ALPHABET,
   ROOM_LENGTH,
@@ -63,7 +65,12 @@ export class Rooms {
   constructor(
     private now: () => number = () => Date.now(),
     private inviteTtl: number = INVITE_TTL_MS,
-    private timing = { firstMove: FIRST_MOVE_MS, idle: IDLE_MS, grace: IDLE_GRACE_MS }
+    private timing = {
+      firstMove: FIRST_MOVE_MS,
+      quiet: IDLE_QUIET_MS,
+      warning: IDLE_WARNING_MS,
+      window: IDLE_WINDOW_MS,
+    }
   ) {}
 
   get size() {
@@ -249,8 +256,8 @@ export class Rooms {
     const side = room.chess.turn();
     const ply = room.chess.history().length;
     if (ply < 2) return { kind: "abort", side, at: room.turnSince + this.timing.firstMove };
-    const at = Math.max(room.turnSince + this.timing.idle, room.startedAt + this.timing.grace);
-    return { kind: "idle", side, at };
+    if (room.turnSince - room.startedAt >= this.timing.window) return null;
+    return { kind: "idle", side, at: room.turnSince + this.timing.quiet + this.timing.warning };
   }
 
   private deadlineState(room: Room) {
@@ -263,7 +270,7 @@ export class Rooms {
     if (!d || this.now() < d.at) return false;
     const who = NAME[d.side];
     if (d.kind === "abort") this.finish(room, `Game aborted: ${who} didn't make a first move`);
-    else this.finish(room, `${NAME[other(d.side)]} wins: ${who} didn't move for ${this.timing.idle / 1000} s`);
+    else this.finish(room, `${NAME[other(d.side)]} wins: ${who} didn't move for ${formatWait(this.timing.quiet + this.timing.warning)}`);
     return true;
   }
 

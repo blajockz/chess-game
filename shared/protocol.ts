@@ -61,8 +61,14 @@ export type ErrorCode =
   | "server_busy";
 
 export const FIRST_MOVE_MS = 30 * 1000;
-export const IDLE_MS = 30 * 1000;
-export const IDLE_GRACE_MS = 60 * 1000;
+export const IDLE_QUIET_MS = 2 * 60 * 1000;
+export const IDLE_WARNING_MS = 30 * 1000;
+export const IDLE_WINDOW_MS = 3 * 60 * 1000;
+
+export function formatWait(ms: number) {
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
 
 export const INVITE_TTL_MS = 10 * 60 * 1000;
 

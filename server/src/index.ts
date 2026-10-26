@@ -4,8 +4,9 @@ import { WebSocketServer, type WebSocket } from "ws";
 import {
   DEFAULT_PORT,
   FIRST_MOVE_MS,
-  IDLE_GRACE_MS,
-  IDLE_MS,
+  IDLE_QUIET_MS,
+  IDLE_WARNING_MS,
+  IDLE_WINDOW_MS,
   INVITE_TTL_MS,
   type ClientMsg,
   type ServerMsg,
@@ -24,8 +25,9 @@ const IP_DEBUG = process.env.IP_DEBUG === "1";
 
 const rooms = new Rooms(undefined, INVITE_TTL, {
   firstMove: Number(process.env.FIRST_MOVE_MS) || FIRST_MOVE_MS,
-  idle: Number(process.env.IDLE_MS) || IDLE_MS,
-  grace: Number(process.env.IDLE_GRACE_MS) || IDLE_GRACE_MS,
+  quiet: Number(process.env.IDLE_QUIET_MS) || IDLE_QUIET_MS,
+  warning: Number(process.env.IDLE_WARNING_MS) || IDLE_WARNING_MS,
+  window: Number(process.env.IDLE_WINDOW_MS) || IDLE_WINDOW_MS,
 });
 
 const creates = new RateLimiter(LIMITS.creates.capacity, LIMITS.creates.perSecond);
