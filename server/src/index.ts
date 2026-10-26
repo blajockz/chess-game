@@ -13,9 +13,9 @@ import {
   type Side,
 } from "../../shared/protocol.js";
 import { GameError, Rooms, type Room } from "./rooms.js";
-import { LIMITS, RateLimiter } from "./limits.js";
+import { IP_WINDOW, IpGuard, LIMITS, RateLimiter } from "./limits.js";
 import { STATIC_DIR, hasBuild, plain, serveStatic } from "./static.js";
-import { clientIp, originAllowed, readMessage, securityHeaders } from "./security.js";
+import { clientIp, ipHeaders, originAllowed, readMessage, securityHeaders } from "./security.js";
 import { ProofOfWork, type Challenge } from "./challenges.js";
 
 const PORT = Number(process.env.PORT) || DEFAULT_PORT;
@@ -34,6 +34,17 @@ const creates = new RateLimiter(LIMITS.creates.capacity, LIMITS.creates.perSecon
 const joins = new RateLimiter(LIMITS.joins.capacity, LIMITS.joins.perSecond);
 const upgrades = new RateLimiter(LIMITS.upgrades.capacity, LIMITS.upgrades.perSecond);
 const requests = new RateLimiter(LIMITS.http.capacity, LIMITS.http.perSecond);
+const requestWindow = new IpGuard(IP_WINDOW.maxRequests, IP_WINDOW.windowMs, IP_WINDOW.banMs);
+const messageWindow = new IpGuard(IP_WINDOW.maxMessages, IP_WINDOW.windowMs, IP_WINDOW.banMs);
+
+function bannedFor(ip: string) {
+  return Math.max(requestWindow.bannedFor(ip), messageWindow.bannedFor(ip));
+}
+
+function banned(ip: string, why: string) {
+  console.warn(`Banned ${ip} for ${Math.round(IP_WINDOW.banMs / 60_000)} min: ${why}`);
+  for (const [ws, conn] of conns) if (conn.ip === ip) ws.close(1008, "Banned for too many requests");
+}
 const pow = new ProofOfWork();
 const connectionsPerIp = new Map<string, number>();
 
@@ -192,22 +203,31 @@ const SERVE_GAME = hasBuild();
 const http = createServer(
   { headersTimeout: 10_000, requestTimeout: 15_000, keepAliveTimeout: 5_000, connectionsCheckingInterval: 2000 },
   (req, res) => {
-  const ip = clientIp(req);
-  if (!requests.take(ip)) {
-    plain(req, res, 429, "Too many requests", { "retry-after": "10" });
-    return;
-  }
-  const path = (req.url ?? "").split("?")[0];
-  if (path === "/health") {
-    res.writeHead(200, { ...securityHeaders(req), "content-type": "application/json", "cache-control": "no-store" });
-    res.end(JSON.stringify(IP_DEBUG ? { ok: true, ip } : { ok: true }));
-    return;
-  }
-  if (SERVE_GAME) {
-    serveStatic(req, res);
-    return;
-  }
-  plain(req, res, 200, "Tempo game server. Connect with a WebSocket on /ws.");
+    const path = (req.url ?? "").split("?")[0];
+    if (path === "/health") {
+      res.writeHead(200, { ...securityHeaders(req), "content-type": "application/json", "cache-control": "no-store" });
+      res.end(JSON.stringify(IP_DEBUG ? { ok: true, ...ipHeaders(req) } : { ok: true }));
+      return;
+    }
+    const ip = clientIp(req);
+    const left = requestWindow.hit(ip);
+    if (left < 0 || bannedFor(ip) > 0) {
+      if (left === -2) banned(ip, "too many requests");
+      const wait = Math.ceil(bannedFor(ip) / 1000);
+      plain(req, res, 429, `Too many requests. Try again in ${Math.ceil(wait / 60)} min.`, { "retry-after": String(wait) });
+      return;
+    }
+    if (!requests.take(ip)) {
+      plain(req, res, 429, "Too many requests", { "retry-after": "10" });
+      return;
+    }
+    res.setHeader("ratelimit-limit", String(IP_WINDOW.maxRequests));
+    res.setHeader("ratelimit-remaining", String(left));
+    if (SERVE_GAME) {
+      serveStatic(req, res);
+      return;
+    }
+    plain(req, res, 200, "Tempo game server. Connect with a WebSocket on /ws.");
   }
 );
 
@@ -231,6 +251,9 @@ http.on("upgrade", (req, socket, head) => {
   if (path !== "/ws") return refuse(socket, 404, "Not Found");
   if (!originAllowed(req)) return refuse(socket, 403, "Forbidden");
   const ip = clientIp(req);
+  const left = requestWindow.hit(ip);
+  if (left === -2) banned(ip, "too many connections");
+  if (left < 0 || bannedFor(ip) > 0) return refuse(socket, 429, "Too Many Requests");
   if (!upgrades.take(ip)) return refuse(socket, 429, "Too Many Requests");
   if (wss.clients.size >= LIMITS.maxConnections) return refuse(socket, 503, "Service Unavailable");
   wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
@@ -261,6 +284,12 @@ wss.on("connection", (ws: WebSocket, req) => {
   newChallenge(ws, conn);
 
   ws.on("message", (raw, isBinary) => {
+    const left = messageWindow.hit(conn.ip);
+    if (left < 0) {
+      if (left === -2) banned(conn.ip, "too many game messages");
+      ws.close(1008, "Banned for too many requests");
+      return;
+    }
     if (!conn.messages.take("all")) {
       if (!strike(ws, conn, "Flooding")) send(ws, { t: "error", code: "rate_limited", message: "Slow down." });
       return;
@@ -340,6 +369,8 @@ setInterval(
     joins.sweep();
     upgrades.sweep();
     requests.sweep();
+    requestWindow.sweep();
+    messageWindow.sweep();
     pow.sweep();
   }),
   60 * 1000

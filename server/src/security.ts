@@ -4,6 +4,7 @@ import type { ClientMsg, Control, Side } from "../../shared/protocol.js";
 
 export const TRUST_PROXY = process.env.TRUST_PROXY === "1";
 const IP_HEADER = (process.env.IP_HEADER ?? "x-forwarded-for").toLowerCase();
+const PROXY_HOPS = Math.max(1, Math.floor(Number(process.env.PROXY_HOPS) || 1));
 
 const EXTRA_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "")
   .split(",")
@@ -23,13 +24,31 @@ export function ipKey(raw: string) {
   return isIP(ip) ? ip : "unknown";
 }
 
+function headerText(req: IncomingMessage, name: string) {
+  const value = req.headers[name];
+  return Array.isArray(value) ? value.join(",") : value ?? "";
+}
+
 export function clientIp(req: IncomingMessage) {
   if (TRUST_PROXY) {
-    const value = req.headers[IP_HEADER];
-    const first = String(Array.isArray(value) ? value[0] : value ?? "").split(",")[0].trim();
-    if (isIP(first)) return ipKey(first);
+    const list = headerText(req, IP_HEADER)
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const pick = IP_HEADER === "x-forwarded-for" ? list[list.length - PROXY_HOPS] : list[0];
+    if (pick && isIP(pick)) return ipKey(pick);
   }
   return ipKey(req.socket.remoteAddress ?? "");
+}
+
+export function ipHeaders(req: IncomingMessage) {
+  return {
+    used: clientIp(req),
+    "x-forwarded-for": headerText(req, "x-forwarded-for"),
+    "true-client-ip": headerText(req, "true-client-ip"),
+    "cf-connecting-ip": headerText(req, "cf-connecting-ip"),
+    remote: req.socket.remoteAddress ?? "",
+  };
 }
 
 export function isHttps(req: IncomingMessage) {

@@ -13,5 +13,7 @@ services:
         value: "22"
       - key: TRUST_PROXY
         value: "1"
+      - key: IP_HEADER
+        value: true-client-ip
       - key: IP_DEBUG
         value: "1"
