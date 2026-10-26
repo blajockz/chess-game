@@ -75,7 +75,7 @@ export function serveStatic(req: IncomingMessage, res: ServerResponse) {
     return;
   }
 
-  const isIndex = target === join(STATIC_DIR, "index.html");
+  const hashed = target.startsWith(join(STATIC_DIR, "assets") + sep);
   const stream = createReadStream(target);
   stream.on("error", () => {
     if (!res.headersSent) plain(req, res, 500, "Server error");
@@ -85,7 +85,7 @@ export function serveStatic(req: IncomingMessage, res: ServerResponse) {
     res.writeHead(200, {
       ...securityHeaders(req),
       "content-type": TYPES[extname(target)] ?? "application/octet-stream",
-      "cache-control": isIndex ? "no-cache" : "public, max-age=31536000, immutable",
+      "cache-control": hashed ? "public, max-age=31536000, immutable" : "no-cache",
     });
     if (req.method === "HEAD") {
       stream.destroy();
