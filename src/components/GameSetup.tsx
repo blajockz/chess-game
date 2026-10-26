@@ -68,12 +68,12 @@ function presetKey(choice: SetupChoice): string | null {
 
 type Props = {
   initial: SetupChoice;
-  canCancel: boolean;
   onStart: (choice: SetupChoice) => void;
   onCancel: () => void;
+  onOpponentChange?: (opponent: "bot" | "friend") => void;
 };
 
-export default function GameSetup({ initial, canCancel, onStart, onCancel }: Props) {
+export default function GameSetup({ initial, onStart, onCancel, onOpponentChange }: Props) {
   const startKey = presetKey(initial);
   const [picked, setPicked] = useState<string>(startKey ?? "custom");
 
@@ -95,11 +95,16 @@ export default function GameSetup({ initial, canCancel, onStart, onCancel }: Pro
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && canCancel) onCancel();
+      if (e.key === "Escape") onCancel();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canCancel, onCancel]);
+  }, [onCancel]);
+
+  function pickOpponent(value: "bot" | "friend") {
+    setOpponent(value);
+    onOpponentChange?.(value);
+  }
 
   function build(): SetupChoice {
     if (picked !== "custom") {
@@ -132,21 +137,32 @@ export default function GameSetup({ initial, canCancel, onStart, onCancel }: Pro
     (choice.cards ? " · action cards" : "");
 
   return (
-    <div
-      className="setup-backdrop"
-      onPointerDown={(e) => {
-        if (e.target === e.currentTarget && canCancel) onCancel();
-      }}
-    >
-      <div
-        className="setup"
+    <>
+      <div className="setup-scrim" onPointerDown={onCancel} aria-hidden="true" />
+      <aside
+        id="game-panel"
+        className={"setup" + (online ? " is-online" : "")}
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
         aria-labelledby="setup-title"
       >
-        <h2 className="setup-title" id="setup-title">
-          New game
-        </h2>
+        <header className="setup-head">
+          <div>
+            <h2 className="setup-title" id="setup-title">
+              {online ? "Play a friend" : "New game"}
+            </h2>
+            <p className="setup-lead">
+              {online
+                ? "Pick a time control, then send the link to your friend."
+                : "Pick a time control and play the practice bot."}
+            </p>
+          </div>
+          <button className="setup-close" onClick={onCancel} aria-label="Close the game panel" title="Close (Esc)">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </button>
+        </header>
 
         <section className="setup-block" aria-label="Time control">
           {PRESETS.map((group) => (
@@ -257,7 +273,7 @@ export default function GameSetup({ initial, canCancel, onStart, onCancel }: Pro
                   key={value}
                   className={"side-btn" + (opponent === value ? " is-on" : "")}
                   aria-pressed={opponent === value}
-                  onClick={() => setOpponent(value)}
+                  onClick={() => pickOpponent(value)}
                 >
                   {text}
                 </button>
@@ -324,11 +340,9 @@ export default function GameSetup({ initial, canCancel, onStart, onCancel }: Pro
             <span>{subline}</span>
           </p>
           <div className="setup-actions">
-            {canCancel && (
-              <button className="ghost-btn" onClick={onCancel}>
-                Cancel
-              </button>
-            )}
+            <button className="ghost-btn" onClick={onCancel}>
+              Cancel
+            </button>
             <button
               ref={startRef}
               className="start-btn"
@@ -339,8 +353,8 @@ export default function GameSetup({ initial, canCancel, onStart, onCancel }: Pro
             </button>
           </div>
         </footer>
-      </div>
-    </div>
+      </aside>
+    </>
   );
 }
 

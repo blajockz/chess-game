@@ -19,6 +19,8 @@ type Props = {
   onAcceptDraw?: () => void;
   onDeclineDraw?: () => void;
   deadline?: { text: string; time: string; urgent: boolean } | null;
+  emptyText?: string;
+  idle?: boolean;
   review?: {
     current: number;
     viewing: boolean;
@@ -70,6 +72,8 @@ export default function MovePanel({
   onDeclineDraw,
   review,
   deadline = null,
+  emptyText,
+  idle = false,
 }: Props) {
   const [confirm, setConfirm] = useState<Confirm>(null);
   const noRef = useRef<HTMLButtonElement>(null);
@@ -146,7 +150,7 @@ export default function MovePanel({
       )}
 
       {moves.length === 0 ? (
-        <p className="rail-empty">Play a move to start the record.</p>
+        <p className="rail-empty">{emptyText ?? "Play a move to start the record."}</p>
       ) : (
         <ol className="move-list" ref={listRef}>
           {moves.map((move, i) => (
@@ -200,7 +204,7 @@ export default function MovePanel({
         </div>
       )}
 
-      {over ? (
+      {idle ? null : over ? (
         <div className="rail-actions">
           <button className="rail-btn is-primary" onClick={onNewGame}>
             New game

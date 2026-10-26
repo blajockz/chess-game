@@ -5,6 +5,7 @@ import Board from "./components/Board";
 import PlayerStrip from "./components/PlayerStrip";
 import MovePanel, { type DrawState } from "./components/MovePanel";
 import WeatherLayer from "./components/WeatherLayer";
+import Sidebar, { type SidebarItem } from "./components/Sidebar";
 import CardPanel from "./components/CardPanel";
 import ActionCard from "./components/ActionCard";
 import { useCards, useShieldFilter } from "./cards/useCards";
@@ -63,7 +64,18 @@ export default function App() {
 
   const [joining, setJoining] = useState(linkFromUrl);
   const joiningCode = joining?.room ?? null;
-  const [setupOpen, setSetupOpen] = useState(() => linkFromUrl() === null);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [panel, setPanel] = useState<SidebarItem>("bot");
+  const swallowClick = useRef(false);
+
+  function openPanel(kind: SidebarItem) {
+    if (setupOpen && panel === kind) {
+      setSetupOpen(false);
+      return;
+    }
+    setPanel(kind);
+    setSetupOpen(true);
+  }
   const online = useOnline();
   const onlineMode = online.active || online.room !== null || joiningCode !== null;
   const onlineRef = useRef(onlineMode);
@@ -150,6 +162,14 @@ export default function App() {
     },
     shield.ref
   );
+
+  useEffect(() => {
+    if (!started && !onlineMode && game.ply > 0) {
+      setStarted(true);
+      setStartedAt(performance.now());
+      setNow(performance.now());
+    }
+  }, [game.ply]);
 
   useEffect(() => {
     if (joining) online.join(joining.room, joining.invite);
@@ -369,6 +389,7 @@ export default function App() {
     online.leave();
     online.clearError();
     setJoining(null);
+    setPanel("bot");
     setSetupOpen(true);
   }
 
@@ -426,12 +447,27 @@ export default function App() {
             ? `Online · ${describeControl(serverState.control)}`
             : describeSetup(lastSetup)
         }
-        onNewGame={() => setSetupOpen(true)}
+        onNewGame={() => openPanel("bot")}
         theme={theme}
         onThemeChange={setTheme}
       />
 
-      <main className="table">
+      <Sidebar open={setupOpen ? panel : null} onOpen={openPanel} />
+
+      <main
+        className="table"
+        onPointerDownCapture={() => {
+          if (!setupOpen) return;
+          swallowClick.current = true;
+          setSetupOpen(false);
+        }}
+        onClickCapture={(e) => {
+          if (!swallowClick.current) return;
+          swallowClick.current = false;
+          e.stopPropagation();
+          e.preventDefault();
+        }}
+      >
         <section className="board-column">
           <PlayerStrip
             name="Opponent"
@@ -523,7 +559,13 @@ export default function App() {
             resignLockedFor={resignLocked ? Math.ceil(resignLockMs / 1000) : 0}
             onResign={resign}
             onOfferDraw={offerDraw}
-            onNewGame={() => setSetupOpen(true)}
+            onNewGame={() => openPanel("bot")}
+            idle={!started && !onlineMode}
+            emptyText={
+              !started && !onlineMode
+                ? `Move a piece to start a ${describeSetup(lastSetup)} game against the practice bot, or pick another game from the menu.`
+                : undefined
+            }
             incomingDraw={incomingDraw}
             onAcceptDraw={() => online.answerDraw(true)}
             onDeclineDraw={() => online.answerDraw(false)}
@@ -585,10 +627,11 @@ export default function App() {
 
       {setupOpen && (
         <GameSetup
-          initial={lastSetup}
-          canCancel={started}
+          key={panel}
+          initial={{ ...lastSetup, opponent: panel }}
           onStart={startGame}
           onCancel={() => setSetupOpen(false)}
+          onOpponentChange={setPanel}
         />
       )}
     </div>

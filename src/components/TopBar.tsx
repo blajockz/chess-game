@@ -28,8 +28,8 @@ export default function TopBar({
   return (
     <header className="topbar">
       <div className="identity">
-        <span className="mark">♞</span>
-        <span className="wordmark">Chess</span>
+        <img className="mark" src="/favicon.svg" alt="" width={34} height={34} />
+        <span className="wordmark">Tempo</span>
       </div>
 
       <div className="modes" role="group" aria-label="Game mode">
