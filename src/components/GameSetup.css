@@ -207,6 +207,7 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   text-align: center;
+  appearance: textfield;
   -moz-appearance: textfield;
 }
 

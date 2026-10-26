@@ -114,6 +114,7 @@ export default function App() {
           running: u.state.running,
           turn: u.state.turn,
           at: u.at,
+          mods: u.state.mods,
         }
       : null;
 
@@ -159,9 +160,22 @@ export default function App() {
       over,
       frozen,
       drawPending: drawState === "waiting",
+      remote: onlineMode
+        ? {
+            state: serverState?.cards ?? null,
+            play: (card, picks) => online.playCard(card, picks, game.ply),
+          }
+        : null,
     },
     shield.ref
   );
+
+  useEffect(() => {
+    if (online.error?.code === "card_refused") {
+      cards.say(online.error.message);
+      online.clearError();
+    }
+  }, [online.error]);
 
   useEffect(() => {
     if (!started && !onlineMode && game.ply > 0) {
@@ -189,7 +203,8 @@ export default function App() {
 
   useEffect(() => {
     if (!u) return;
-    game.follow(u.state.moves);
+    if (u.state.cards) game.followTimeline(u.state.timeline);
+    else game.follow(u.state.moves);
   }, [u?.key]);
 
   const onlineStarted = serverState?.status === "playing";
@@ -208,7 +223,11 @@ export default function App() {
     setYou(side);
     setJoining(null);
     if (choice.opponent === "friend") {
-      online.create(controlFor(choice, side), side);
+      online.create(
+        controlFor(choice, side),
+        side,
+        Boolean(choice.cards) && !isBullet(controlFor(choice, side))
+      );
     } else if (onlineMode) {
       online.leave();
     }

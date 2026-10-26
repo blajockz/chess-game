@@ -78,16 +78,21 @@ function safely(fn: () => void) {
 function armFlag(room: Room) {
   if (room.flagTimer) clearTimeout(room.flagTimer);
   room.flagTimer = null;
-  if (room.status !== "playing" || room.turnStartedAt === null) return;
+  const wait = rooms.flagIn(room);
+  if (wait === null) return;
   const turn = room.chess.turn();
-  const ply = room.chess.history().length;
+  const ply = rooms.ply(room);
   room.flagTimer = setTimeout(
     safely(() => {
-      if (room.status !== "playing" || room.chess.history().length !== ply) return;
+      if (room.status !== "playing" || rooms.ply(room) !== ply) return;
+      if (rooms.liveClock(room)[turn] > 0) {
+        armFlag(room);
+        return;
+      }
       rooms.finish(room, `${turn === "w" ? "Black" : "White"} wins on time`);
       broadcast(room);
     }),
-    room.clock[turn] + 50
+    wait + 50
   );
 }
 
@@ -130,7 +135,7 @@ function handle(ws: WebSocket, conn: Conn, msg: ClientMsg) {
     if (!creates.take(conn.ip)) slowDown();
     requireWork(ws, conn, msg.pow);
     leaveCurrent(ws);
-    const { room, side, token } = rooms.create(msg.control, msg.side, ws, conn.ip);
+    const { room, side, token } = rooms.create(msg.control, msg.side, ws, conn.ip, msg.cards === true);
     where.set(ws, { room, side });
     send(ws, seatMessage(room, side, token));
     return;
@@ -162,6 +167,13 @@ function handle(ws: WebSocket, conn: Conn, msg: ClientMsg) {
     armFlag(room);
     armDeadline(room);
     broadcast(room, last ?? undefined);
+    return;
+  }
+
+  if (msg.t === "card") {
+    rooms.playCard(room, side, msg.card, msg.picks, msg.ply);
+    armFlag(room);
+    broadcast(room);
     return;
   }
 

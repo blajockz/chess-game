@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Chess, type Move, type Square } from "chess.js";
 import { useSounds } from "./useSounds";
+import type { TimelineEvent } from "../../shared/protocol";
 
 export type PromotionPiece = "q" | "r" | "b" | "n";
 
@@ -23,6 +24,7 @@ export function useChessGame(
   const gameRef = useRef(new Chess());
   const game = gameRef.current;
   const earlier = useRef<Move[]>([]);
+  const applied = useRef<TimelineEvent[]>([]);
   const play = useSounds(soundOn);
 
   const [, setTick] = useState(0);
@@ -35,6 +37,7 @@ export function useChessGame(
   function reset() {
     gameRef.current = new Chess();
     earlier.current = [];
+    applied.current = [];
     setSelected(null);
     setPending(null);
     setPremove(null);
@@ -75,6 +78,7 @@ export function useChessGame(
     } catch {
       move = null;
     }
+    if (move) applied.current = [...applied.current, { t: "move", san: move.san }];
     if (move && local) {
       localRef.current?.({ from: move.from, to: move.to, promotion: move.promotion, ply: plyBefore });
     }
@@ -172,6 +176,7 @@ export function useChessGame(
     if (result) {
       earlier.current = [...earlier.current, ...current.history({ verbose: true })];
       gameRef.current = copy;
+      applied.current = [...applied.current, { t: "card", fen: copy.fen() }];
     }
     setSelected(null);
     refresh();
@@ -208,6 +213,48 @@ export function useChessGame(
     for (const san of sans) fresh.move(san);
     gameRef.current = fresh;
     earlier.current = [];
+    applied.current = sans.map((san) => ({ t: "move" as const, san }));
+    setSelected(null);
+    setPending(null);
+    setPremove(null);
+    setPremoveFrom(null);
+    refresh();
+  }
+
+  function followTimeline(timeline: TimelineEvent[]) {
+    const mine = applied.current;
+    const same = (a: TimelineEvent, b: TimelineEvent) =>
+      a.t === b.t && (a.t === "move" ? a.san === (b as typeof a).san : a.fen === (b as typeof a).fen);
+    const prefix = mine.length <= timeline.length && mine.every((e, i) => same(e, timeline[i]));
+    if (prefix && mine.length === timeline.length) return;
+    if (prefix && timeline.length === mine.length + 1) {
+      const next = timeline[timeline.length - 1];
+      if (next.t === "card") {
+        edit((copy) => {
+          copy.load(next.fen);
+          return true;
+        });
+        return;
+      }
+      try {
+        const m = new Chess(gameRef.current.fen()).move(next.san);
+        commit(m.from as Square, m.to as Square, m.promotion as PromotionPiece | undefined, false);
+        return;
+      } catch {
+      }
+    }
+    let chess = new Chess();
+    let before: Move[] = [];
+    for (const e of timeline) {
+      if (e.t === "move") chess.move(e.san);
+      else {
+        before = [...before, ...chess.history({ verbose: true })];
+        chess = new Chess(e.fen);
+      }
+    }
+    gameRef.current = chess;
+    earlier.current = before;
+    applied.current = [...timeline];
     setSelected(null);
     setPending(null);
     setPremove(null);
@@ -376,6 +423,7 @@ export function useChessGame(
     applyRemote,
     syncTo,
     follow,
+    followTimeline,
     sans: () => verbose.map((m) => m.san),
     verboseMoves: verbose,
     sound: play,

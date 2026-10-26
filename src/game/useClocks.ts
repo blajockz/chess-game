@@ -74,6 +74,7 @@ export type ClockSync = {
   running: boolean;
   turn: "w" | "b";
   at: number;
+  mods?: { w: Mods; b: Mods };
 };
 
 export const CLOCK_FLOOR_MS = 10_000;
@@ -189,7 +190,9 @@ export function useClocks({ control, turn, ply, paused = false, sync = null }: O
     const r = ref.current;
     r.w = sync.w;
     r.b = sync.b;
-    r.mods = { w: { ...NO_MODS }, b: { ...NO_MODS } };
+    r.mods = sync.mods
+      ? { w: { ...sync.mods.w }, b: { ...sync.mods.b } }
+      : { w: { ...NO_MODS }, b: { ...NO_MODS } };
     if (sync.running && running) {
       r.side = sync.turn;
       r.at = sync.at;

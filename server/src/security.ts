@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { isIP } from "node:net";
 import type { ClientMsg, Control, Side } from "../../shared/protocol.js";
+import { CARD_IDS, type CardId } from "../../shared/cards.js";
 
 export const TRUST_PROXY = process.env.TRUST_PROXY === "1";
 const IP_HEADER = (process.env.IP_HEADER ?? "x-forwarded-for").toLowerCase();
@@ -137,9 +138,16 @@ export function readMessage(raw: Buffer | ArrayBuffer | Buffer[], isBinary: bool
       if (!optional(c.blackInitial, seconds)) return null;
       if (msg.side !== "w" && msg.side !== "b" && msg.side !== "random") return null;
       if (!optional(msg.pow, nonce)) return null;
+      if (!optional(msg.cards, (v) => typeof v === "boolean")) return null;
       const control: Control = { initial: c.initial as number, increment: c.increment as number };
       if (c.blackInitial !== undefined) control.blackInitial = c.blackInitial as number;
-      return { t: "create", control, side: msg.side as Side | "random", pow: msg.pow as string | undefined };
+      return {
+        t: "create",
+        control,
+        side: msg.side as Side | "random",
+        cards: msg.cards === true,
+        pow: msg.pow as string | undefined,
+      };
     }
     case "join": {
       if (typeof msg.room !== "string" || !ROOM.test(msg.room)) return null;
@@ -160,6 +168,13 @@ export function readMessage(raw: Buffer | ArrayBuffer | Buffer[], isBinary: bool
       if (!optional(msg.promotion, (v) => v === "q" || v === "r" || v === "b" || v === "n")) return null;
       if (!Number.isInteger(msg.ply) || (msg.ply as number) < 0 || (msg.ply as number) > 2000) return null;
       return { t: "move", from: msg.from, to: msg.to, promotion: msg.promotion as string | undefined, ply: msg.ply as number };
+    }
+    case "card": {
+      if (typeof msg.card !== "string" || !CARD_IDS.includes(msg.card as CardId)) return null;
+      if (!Array.isArray(msg.picks) || msg.picks.length > 2) return null;
+      if (!msg.picks.every((p) => typeof p === "string" && SQUARE.test(p))) return null;
+      if (!Number.isInteger(msg.ply) || (msg.ply as number) < 0 || (msg.ply as number) > 2000) return null;
+      return { t: "card", card: msg.card as CardId, picks: [...(msg.picks as string[])], ply: msg.ply as number };
     }
     case "resign":
       return { t: "resign" };

@@ -123,7 +123,7 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
   const base = build();
   const isBulletGame = categoryOf(controlFor(base, "w")) === "Bullet";
   const online = opponent === "friend";
-  const cardsBlocked = isBulletGame || online;
+  const cardsBlocked = isBulletGame;
   const choice: SetupChoice = { ...base, opponent, cards: cards && !cardsBlocked };
   const sideText =
     side === "random" ? "random side" : side === "w" ? "you play White" : "you play Black";
@@ -324,11 +324,7 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
                 <span className="switch-knob" />
               </button>
               <span className="handicap-text">
-                {isBulletGame
-                  ? "Action cards are not available in Bullet"
-                  : online
-                    ? "Action cards aren't available online yet"
-                    : "Play with action cards"}
+                {isBulletGame ? "Action cards are not available in Bullet" : "Play with action cards"}
               </span>
             </div>
           </div>

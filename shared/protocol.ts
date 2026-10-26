@@ -1,4 +1,8 @@
+import type { CardId, CardsState, ClockMods } from "./cards.js";
+
 export type Side = "w" | "b";
+
+export type TimelineEvent = { t: "move"; san: string } | { t: "card"; fen: string };
 
 export type Control = {
   initial: number;
@@ -22,12 +26,16 @@ export type GameState = {
   drawOffer: Side | null;
   drawBlockedUntil: { w: number; b: number };
   deadline: { kind: "abort" | "idle"; side: Side; in: number } | null;
+  cards: CardsState | null;
+  timeline: TimelineEvent[];
+  mods: { w: ClockMods; b: ClockMods };
 };
 
 export type ClientMsg =
-  | { t: "create"; control: Control; side: Side | "random"; pow?: string }
+  | { t: "create"; control: Control; side: Side | "random"; cards?: boolean; pow?: string }
   | { t: "join"; room: string; token?: string; reclaim?: boolean; invite?: string; pow?: string }
   | { t: "move"; from: string; to: string; promotion?: string; ply: number }
+  | { t: "card"; card: CardId; picks: string[]; ply: number }
   | { t: "resign" }
   | { t: "draw"; action: "offer" | "accept" | "decline" };
 
@@ -58,7 +66,8 @@ export type ErrorCode =
   | "bad_invite"
   | "rate_limited"
   | "bad_pow"
-  | "server_busy";
+  | "server_busy"
+  | "card_refused";
 
 export const FIRST_MOVE_MS = 30 * 1000;
 export const IDLE_QUIET_MS = 2 * 60 * 1000;

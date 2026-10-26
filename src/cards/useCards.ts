@@ -1,16 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Move, Square } from "chess.js";
 import {
-  AMOUNTS,
   CARDS,
+  CLOCK_FLOOR_MS,
   MAX_CHARGE,
   UNLOCK_PLY,
+  amountsFor,
+  applyBoardCard,
+  capturedSquare,
   dealHand,
-  type CardCategory,
+  newCardsState,
+  shieldBroken,
+  targetsFor,
   type CardId,
+  type CardsState,
+  type PlayedCard,
+  type Shield,
 } from "./cards";
-import { applyBoardCard, capturedSquare, targetsFor } from "./engine.ts";
-import { CLOCK_FLOOR_MS, type Category } from "../game/useClocks";
+import type { Category } from "../game/useClocks";
 import type { useChessGame } from "../game/useChessGame";
 import type { useClocks } from "../game/useClocks";
 
@@ -23,28 +30,15 @@ const NAME = { w: "White", b: "Black" };
 
 const BOT_CARD_CHANCE = 0.45;
 
-export type PlayedCard = { ply: number; side: Side; card: CardId };
+export type { PlayedCard };
 
-type Shield = { square: Square; owner: Side; untilPly: number };
+type State = CardsState & { on: boolean };
 
-type State = {
-  on: boolean;
-  hand: CardId[];
-  used: Record<Side, CardId[]>;
-  charge: Record<Side, number>;
-  lastPlayed: Record<Side, number>;
-  shield: Shield | null;
-  log: PlayedCard[];
-};
+const OFF: State = { ...newCardsState([]), on: false };
 
-const EMPTY: State = {
-  on: false,
-  hand: [],
-  used: { w: [], b: [] },
-  charge: { w: 0, b: 0 },
-  lastPlayed: { w: -1, b: -1 },
-  shield: null,
-  log: [],
+export type RemoteCards = {
+  state: CardsState | null;
+  play: (card: CardId, picks: string[]) => void;
 };
 
 type Options = {
@@ -56,6 +50,7 @@ type Options = {
   over: boolean;
   frozen: { current: boolean };
   drawPending: boolean;
+  remote: RemoteCards | null;
 };
 
 export function useShieldFilter() {
@@ -69,35 +64,27 @@ export function useShieldFilter() {
 }
 
 export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFilter>["ref"]) {
-  const [s, setS] = useState<State>(EMPTY);
+  const [local, setLocal] = useState<State>(OFF);
   const [targeting, setTargeting] = useState<{ card: CardId; picks: Square[] } | null>(null);
   const [flash, setFlash] = useState<{ squares: Square[]; key: number } | null>(null);
   const [reveal, setReveal] = useState<{ card: CardId; side: Side; key: number } | null>(null);
   const [note, setNote] = useState<string | null>(null);
+
+  const { game, clocks, remote } = opts;
+  const s: State = remote ? (remote.state ? { ...remote.state, on: true } : OFF) : local;
 
   const sRef = useRef(s);
   sRef.current = s;
   const o = useRef(opts);
   o.current = opts;
 
-  const { game, clocks } = opts;
   const fen = game.chess.fen();
 
   const shieldLive =
-    s.shield &&
-    game.turn !== s.shield.owner &&
-    game.ply < s.shield.untilPly &&
-    !breaksShield(s.shield)
+    s.shield && game.turn !== s.shield.owner && game.ply < s.shield.untilPly && !shieldBroken(fen, s.shield)
       ? s.shield
       : null;
   shieldRef.current = { shield: shieldLive, ply: game.ply };
-
-  function breaksShield(shield: Shield) {
-    const chess = o.current.game.chess;
-    if (!chess.isCheck()) return false;
-    const king = chess.findPiece({ type: "k", color: other(shield.owner) })[0];
-    return !!king && chess.attackers(king, shield.owner).includes(shield.square);
-  }
 
   const prevPly = useRef(game.ply);
   const prevGame = useRef(game.gameId);
@@ -112,10 +99,12 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
       return;
     }
     prevPly.current = game.ply;
+    setTargeting(null);
+    if (o.current.remote) return;
     const mover = other(game.turn);
     const last = game.lastFullMove;
 
-    setS((cur) => {
+    setLocal((cur) => {
       if (!cur.on) return cur;
       let shield = cur.shield;
       if (shield && shield.owner === mover && last && last.from === shield.square) {
@@ -128,19 +117,35 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
         charge: { ...cur.charge, [mover]: Math.min(MAX_CHARGE, cur.charge[mover] + 1) },
       };
     });
-    setTargeting(null);
   }, [game.ply, game.gameId]);
 
   useEffect(() => {
     if (opts.over) setTargeting(null);
   }, [opts.over]);
 
+  const seen = useRef<number | null>(null);
+  const remoteLog = remote?.state?.log;
+  useEffect(() => {
+    if (!remoteLog) {
+      seen.current = null;
+      return;
+    }
+    if (seen.current === null || remoteLog.length < seen.current) {
+      seen.current = remoteLog.length;
+      return;
+    }
+    if (remoteLog.length > seen.current) {
+      seen.current = remoteLog.length;
+      announce(remoteLog[remoteLog.length - 1]);
+    }
+  }, [remoteLog?.length]);
+
   const targetCache = useMemo(() => new Map<string, Square[]>(), [fen]);
-  function targets(card: CardId, side: Side, picks: Square[] = []) {
+  function targets(card: CardId, side: Side, picks: Square[] = []): Square[] {
     const key = `${card}:${side}:${picks.join(",")}`;
     let hit = targetCache.get(key);
     if (!hit) {
-      hit = targetsFor(card, o.current.game.chess, side, picks);
+      hit = targetsFor(card, o.current.game.chess.fen(), side, picks) as Square[];
       targetCache.set(key, hit);
     }
     return hit;
@@ -171,16 +176,18 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
     return null;
   }
 
-  function amounts() {
-    const cat = o.current.category;
-    return AMOUNTS[(cat === "Bullet" ? "Blitz" : cat) as CardCategory];
+  function announce(played: PlayedCard) {
+    const key = Date.now();
+    if (played.squares.length) setFlash({ squares: played.squares as Square[], key });
+    setReveal({ card: played.card, side: played.side, key });
+    setNote(played.message);
   }
 
   function resolve(card: CardId, side: Side, picks: Square[]) {
-    const { game, clocks } = o.current;
-    const a = amounts();
+    const { game, clocks, category } = o.current;
+    const a = amountsFor(category);
     const foe = other(side);
-    let changed: Square[] = [];
+    let squares: string[] = [];
     let message = `${NAME[side]} played ${CARDS[card].name}`;
 
     if (card === "thief") {
@@ -199,30 +206,37 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
       clocks.setMods(side, { free: a.cap * 1000 });
       message += `: clock stopped for up to ${a.cap} s`;
     } else if (card === "shield") {
-      changed = [picks[0]];
+      squares = [picks[0]];
     } else {
-      const result = game.edit((chess) => applyBoardCard(card, chess, side, picks));
+      const result = applyBoardCard(card, game.chess.fen(), side, picks);
       if (!result) return false;
-      changed = result;
+      game.edit((chess) => {
+        chess.load(result.fen);
+        return true;
+      });
+      squares = result.squares;
     }
 
-    setS((cur) => ({
+    const played: PlayedCard = { ply: game.ply, side, card, squares, message };
+    setLocal((cur) => ({
       ...cur,
       charge: { ...cur.charge, [side]: cur.charge[side] - CARDS[card].cost },
       used: { ...cur.used, [side]: [...cur.used[side], card] },
       lastPlayed: { ...cur.lastPlayed, [side]: game.ply },
-      shield:
-        card === "shield"
-          ? { square: picks[0], owner: side, untilPly: game.ply + 2 }
-          : cur.shield,
-      log: [...cur.log, { ply: game.ply, side, card }],
+      shield: card === "shield" ? { square: picks[0], owner: side, untilPly: game.ply + 2 } : cur.shield,
+      log: [...cur.log, played],
     }));
-
-    const key = Date.now();
-    if (changed.length) setFlash({ squares: changed, key });
-    setReveal({ card, side, key });
-    setNote(message);
+    announce(played);
     return true;
+  }
+
+  function play(card: CardId, side: Side, picks: Square[]) {
+    const { remote } = o.current;
+    if (remote) {
+      remote.play(card, picks);
+      return true;
+    }
+    return resolve(card, side, picks);
   }
 
   function start(card: CardId) {
@@ -233,7 +247,7 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
       return;
     }
     if (CARDS[card].targets === 0) {
-      resolve(card, side, []);
+      play(card, side, []);
       return;
     }
     o.current.game.clearSelection();
@@ -251,7 +265,7 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
       return;
     }
     setTargeting(null);
-    if (!resolve(targeting.card, side, picks)) setNote("That isn't allowed");
+    if (!play(targeting.card, side, picks)) setNote("That isn't allowed");
   }
 
   function cancel() {
@@ -259,7 +273,7 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
   }
 
   function deal(on: boolean) {
-    setS(on ? { ...EMPTY, on: true, hand: dealHand() } : EMPTY);
+    setLocal(on ? { ...newCardsState(dealHand()), on: true } : OFF);
     setTargeting(null);
     setFlash(null);
     setReveal(null);
@@ -268,7 +282,7 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
 
   useEffect(() => {
     const { bot } = o.current;
-    if (!bot || !s.on || game.turn !== bot || opts.over) return;
+    if (!bot || !s.on || remote || game.turn !== bot || opts.over) return;
     const id = window.setTimeout(() => {
       const cur = sRef.current;
       const playable = cur.hand.filter((c) => whyNot(c, bot) === null);
@@ -276,9 +290,9 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
       const card = playable[Math.floor(Math.random() * playable.length)];
       const picks: Square[] = [];
       for (let i = 0; i < CARDS[card].targets; i++) {
-        const options = targetsFor(card, o.current.game.chess, bot, picks);
+        const options = targetsFor(card, o.current.game.chess.fen(), bot, picks);
         if (!options.length) return;
-        picks.push(options[Math.floor(Math.random() * options.length)]);
+        picks.push(options[Math.floor(Math.random() * options.length)] as Square);
       }
       resolve(card, bot, picks);
     }, 250);
@@ -312,12 +326,14 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
     used: s.used,
     charge: s.charge,
     log: s.log,
-    shieldSquare: shieldLive?.square ?? (s.shield && s.shield.untilPly > game.ply ? s.shield.square : null),
+    shieldSquare:
+      (shieldLive?.square ?? (s.shield && s.shield.untilPly > game.ply ? s.shield.square : null)) as Square | null,
     targeting,
     targetSquares,
     flash,
     reveal,
     note,
+    say: setNote,
     whyNot,
     start,
     pick,

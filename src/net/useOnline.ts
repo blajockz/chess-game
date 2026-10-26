@@ -8,6 +8,7 @@ import {
   type Side,
 } from "../../shared/protocol";
 import { solvePow } from "../../shared/pow";
+import type { CardId } from "../../shared/cards";
 
 export type Connection = "off" | "connecting" | "open" | "reconnecting";
 
@@ -231,8 +232,8 @@ export function useOnline() {
     connect();
   }
 
-  function create(control: Control, mySide: Side) {
-    start({ t: "create", control, side: mySide });
+  function create(control: Control, mySide: Side, cards = false) {
+    start({ t: "create", control, side: mySide, cards });
   }
 
   function join(code: string, inviteKey?: string | null) {
@@ -283,6 +284,7 @@ export function useOnline() {
     move: (from: string, to: string, promotion: string | undefined, ply: number) =>
       send({ t: "move", from, to, promotion, ply }),
     resign: () => send({ t: "resign" }),
+    playCard: (card: CardId, picks: string[], ply: number) => send({ t: "card", card, picks, ply }),
     offerDraw: () => send({ t: "draw", action: "offer" }),
     answerDraw: (accept: boolean) => send({ t: "draw", action: accept ? "accept" : "decline" }),
   };
