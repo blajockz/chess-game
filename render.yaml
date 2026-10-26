@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: tempo-chess
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci && npm run build && npm --prefix server ci
+    startCommand: npm --prefix server start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: IP_DEBUG
+        value: "1"
