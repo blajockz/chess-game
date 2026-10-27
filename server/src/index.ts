@@ -17,6 +17,7 @@ import { IP_WINDOW, IpGuard, LIMITS, RateLimiter } from "./limits.js";
 import { STATIC_DIR, hasBuild, plain, serveStatic } from "./static.js";
 import { clientIp, ipHeaders, originAllowed, readMessage, securityHeaders } from "./security.js";
 import { ProofOfWork, type Challenge } from "./challenges.js";
+import { sendBanPage, wantsPage } from "./banpage.js";
 
 const PORT = Number(process.env.PORT) || DEFAULT_PORT;
 const ROOM_IDLE_MS = 10 * 60 * 1000;
@@ -50,6 +51,37 @@ const connectionsPerIp = new Map<string, number>();
 
 type Conn = { ip: string; messages: RateLimiter; strikes: number; challenge: Challenge | null };
 const alive = new WeakMap<WebSocket, boolean>();
+const rtts = new WeakMap<WebSocket, number[]>();
+const LAG_PING_MS = Number(process.env.LAG_PING_MS) || 3000;
+
+function rttOf(ws: WebSocket): number | null {
+  const list = rtts.get(ws);
+  if (!list?.length) return null;
+  const sorted = [...list].sort((a, b) => a - b);
+  return Math.round(sorted[Math.floor(sorted.length / 2)]);
+}
+
+function measured(ws: WebSocket, data: Buffer) {
+  const sent = Number(data.toString());
+  if (!Number.isFinite(sent) || sent <= 0) return;
+  const rtt = Date.now() - sent;
+  if (rtt < 0 || rtt > 30_000) return;
+  const list = [...(rtts.get(ws) ?? []), rtt].slice(-5);
+  rtts.set(ws, list);
+  const seat = where.get(ws);
+  if (!seat) return;
+  const before = seat.room.lag[seat.side];
+  const now = rttOf(ws);
+  seat.room.lag[seat.side] = now;
+  const last = lagSentAt.get(seat.room) ?? 0;
+  const changed = before === null || (now !== null && Math.abs(now - before) > 40);
+  if (changed && (before === null || Date.now() - last > 5000)) {
+    lagSentAt.set(seat.room, Date.now());
+    broadcast(seat.room);
+  }
+}
+
+const lagSentAt = new WeakMap<Room, number>();
 const conns = new Map<WebSocket, Conn>();
 
 const where = new Map<WebSocket, { room: Room; side: Side }>();
@@ -131,6 +163,11 @@ function requireWork(ws: WebSocket, conn: Conn, answer: string | undefined) {
 }
 
 function handle(ws: WebSocket, conn: Conn, msg: ClientMsg) {
+  if (msg.t === "ping") {
+    send(ws, { t: "pong", n: msg.n });
+    return;
+  }
+
   if (msg.t === "create") {
     if (!creates.take(conn.ip)) slowDown();
     requireWork(ws, conn, msg.pow);
@@ -152,6 +189,7 @@ function handle(ws: WebSocket, conn: Conn, msg: ClientMsg) {
       send(old, { t: "error", code: "replaced", message: "This game was opened in another tab." });
     }
     where.set(ws, { room, side });
+    room.lag[side] = rttOf(ws);
     if (!room.deadlineTimer) armDeadline(room);
     send(ws, seatMessage(room, side, token));
     broadcast(room);
@@ -163,7 +201,8 @@ function handle(ws: WebSocket, conn: Conn, msg: ClientMsg) {
   const { room, side } = seat;
 
   if (msg.t === "move") {
-    const last = rooms.move(room, side, msg.from, msg.to, msg.promotion, msg.ply);
+    const travel = (rttOf(ws) ?? 0) / 2;
+    const last = rooms.move(room, side, msg.from, msg.to, msg.promotion, msg.ply, travel);
     armFlag(room);
     armDeadline(room);
     broadcast(room, last ?? undefined);
@@ -196,6 +235,7 @@ function leaveCurrent(ws: WebSocket) {
   const seat = where.get(ws);
   if (!seat) return;
   rooms.leave(seat.room, ws);
+  seat.room.lag[seat.side] = null;
   where.delete(ws);
   broadcast(seat.room);
 }
@@ -225,7 +265,12 @@ const http = createServer(
     const left = requestWindow.hit(ip);
     if (left < 0 || bannedFor(ip) > 0) {
       if (left === -2) banned(ip, "too many requests");
-      const wait = Math.ceil(bannedFor(ip) / 1000);
+      const msLeft = bannedFor(ip);
+      if (wantsPage(req)) {
+        sendBanPage(req, res, msLeft, Math.round(IP_WINDOW.banMs / 60_000));
+        return;
+      }
+      const wait = Math.ceil(msLeft / 1000);
       plain(req, res, 429, `Too many requests. Try again in ${Math.ceil(wait / 60)} min.`, { "retry-after": String(wait) });
       return;
     }
@@ -284,7 +329,10 @@ wss.on("connection", (ws: WebSocket, req) => {
   connectionsPerIp.set(ip, open);
 
   alive.set(ws, true);
-  ws.on("pong", () => alive.set(ws, true));
+  ws.on("pong", (data) => {
+    alive.set(ws, true);
+    measured(ws, data);
+  });
 
   const conn: Conn = {
     ip,
@@ -358,6 +406,15 @@ setInterval(
     }
   }),
   2000
+).unref();
+
+setInterval(
+  safely(() => {
+    for (const ws of where.keys()) {
+      if (ws.readyState === ws.OPEN) ws.ping(Buffer.from(String(Date.now())));
+    }
+  }),
+  LAG_PING_MS
 ).unref();
 
 setInterval(

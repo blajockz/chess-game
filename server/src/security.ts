@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import { isIP } from "node:net";
+import { randomBytes } from "node:crypto";
 import type { ClientMsg, Control, Side } from "../../shared/protocol.js";
 import { CARD_IDS, type CardId } from "../../shared/cards.js";
 
@@ -30,6 +31,28 @@ function headerText(req: IncomingMessage, name: string) {
   return Array.isArray(value) ? value.join(",") : value ?? "";
 }
 
+export function isPrivate(ip: string) {
+  const v = ip.startsWith("::ffff:") && isIP(ip.slice(7)) === 4 ? ip.slice(7) : ip;
+  if (isIP(v) === 4) {
+    const [a, b] = v.split(".").map(Number);
+    return (
+      a === 10 || a === 127 || a === 0 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254) ||
+      (a === 100 && b >= 64 && b <= 127)
+    );
+  }
+  if (isIP(v) === 6) {
+    const low = v.toLowerCase();
+    return low === "::1" || low === "::" || /^f[cd]/.test(low) || /^fe[89ab]/.test(low);
+  }
+  return true;
+}
+
+const unknownKeys = new WeakMap<IncomingMessage, string>();
+let warned = false;
+
 export function clientIp(req: IncomingMessage) {
   if (TRUST_PROXY) {
     const list = headerText(req, IP_HEADER)
@@ -37,7 +60,20 @@ export function clientIp(req: IncomingMessage) {
       .map((s) => s.trim())
       .filter(Boolean);
     const pick = IP_HEADER === "x-forwarded-for" ? list[list.length - PROXY_HOPS] : list[0];
-    if (pick && isIP(pick)) return ipKey(pick);
+    if (pick && isIP(pick) && !isPrivate(pick)) return ipKey(pick);
+    if (!warned) {
+      warned = true;
+      console.warn(
+        `Can't read the visitor's address from the "${IP_HEADER}" header (got "${list.join(", ")}"). ` +
+          "Per-address limits are off for such requests. Check /health with IP_DEBUG=1."
+      );
+    }
+    let key = unknownKeys.get(req);
+    if (!key) {
+      key = "unknown:" + randomBytes(6).toString("hex");
+      unknownKeys.set(req, key);
+    }
+    return key;
   }
   return ipKey(req.socket.remoteAddress ?? "");
 }
@@ -45,6 +81,7 @@ export function clientIp(req: IncomingMessage) {
 export function ipHeaders(req: IncomingMessage) {
   return {
     used: clientIp(req),
+    readable: !clientIp(req).startsWith("unknown:"),
     "x-forwarded-for": headerText(req, "x-forwarded-for"),
     "true-client-ip": headerText(req, "true-client-ip"),
     "cf-connecting-ip": headerText(req, "cf-connecting-ip"),
@@ -178,6 +215,9 @@ export function readMessage(raw: Buffer | ArrayBuffer | Buffer[], isBinary: bool
     }
     case "resign":
       return { t: "resign" };
+    case "ping":
+      if (!Number.isInteger(msg.n) || (msg.n as number) < 0 || (msg.n as number) > 1e9) return null;
+      return { t: "ping", n: msg.n as number };
     case "draw":
       if (msg.action !== "offer" && msg.action !== "accept" && msg.action !== "decline") return null;
       return { t: "draw", action: msg.action };

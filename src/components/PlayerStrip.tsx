@@ -8,7 +8,23 @@ type Props = {
   low?: boolean;
   captured?: string[];
   advantage?: number;
+  signal?: number | null | "down";
 };
+
+function Signal({ value }: { value: number | null | "down" }) {
+  const bars = value === "down" ? 0 : value === null ? -1 : value < 150 ? 3 : value < 400 ? 2 : 1;
+  const label =
+    value === "down" ? "Disconnected" : value === null ? "Measuring connection…" : `Connection: ${value} ms`;
+  const tone = bars === 0 ? "is-down" : bars === 1 ? "is-poor" : bars === 2 ? "is-ok" : bars === 3 ? "is-good" : "";
+  return (
+    <span className={"signal " + tone} title={label} aria-label={label} role="img">
+      {[1, 2, 3].map((i) => (
+        <span key={i} className={"signal-bar" + (i <= bars ? " is-on" : "")} style={{ height: 3 + i * 3 }} />
+      ))}
+      {typeof value === "number" && <span className="signal-ms">{value} ms</span>}
+    </span>
+  );
+}
 
 const GLYPHS: Record<string, string> = {
   q: "♛",
@@ -26,6 +42,7 @@ export default function PlayerStrip({
   low = false,
   captured = [],
   advantage = 0,
+  signal,
 }: Props) {
   return (
     <div className="strip">
@@ -33,7 +50,10 @@ export default function PlayerStrip({
 
       <div className="who">
         <span className="who-name">{name}</span>
-        <span className="who-detail">{detail}</span>
+        <span className="who-detail">
+          {detail}
+          {signal !== undefined && <Signal value={signal} />}
+        </span>
       </div>
 
       {captured.length > 0 && (

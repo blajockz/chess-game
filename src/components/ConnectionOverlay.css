@@ -1,0 +1,160 @@
+.conn-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  border-radius: inherit;
+  background: rgba(8, 8, 6, 0.62);
+  animation: conn-fade 0.2s ease-out;
+}
+
+@keyframes conn-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.conn-box {
+  width: min(320px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 22px 20px 18px;
+  text-align: center;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+}
+
+.conn-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  color: var(--brass);
+  background: var(--brass-soft);
+}
+
+.conn-icon.is-offline {
+  color: #ff7a5c;
+  background: rgba(201, 69, 47, 0.16);
+}
+
+.conn-title {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 22px;
+  font-weight: 400;
+}
+
+.conn-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.conn-spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--brass);
+  animation: conn-spin 0.8s linear infinite;
+}
+
+@keyframes conn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.conn-warn {
+  margin: 2px 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.conn-retry {
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #16150f;
+  background: var(--brass);
+}
+
+.conn-retry:hover {
+  filter: brightness(1.08);
+}
+
+.conn-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 15;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 20px);
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  animation: conn-drop 0.25s ease-out;
+}
+
+.conn-banner strong {
+  font-variant-numeric: tabular-nums;
+  color: var(--brass);
+}
+
+.conn-banner.is-good {
+  border-color: rgba(98, 186, 120, 0.5);
+}
+
+.conn-banner .conn-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e0a33a;
+}
+
+.conn-banner.is-good .conn-dot {
+  background: #62ba78;
+}
+
+@keyframes conn-drop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conn-overlay,
+  .conn-banner,
+  .conn-spinner {
+    animation: none;
+  }
+}

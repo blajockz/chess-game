@@ -7,6 +7,8 @@ import {
   IDLE_WINDOW_MS,
   formatWait,
   INVITE_TTL_MS,
+  LAG_BUDGET,
+  LAG_COMP_MAX_MS,
   ROOM_ALPHABET,
   ROOM_LENGTH,
   type Control,
@@ -63,6 +65,8 @@ export type Room = {
   cards: CardsState | null;
   timeline: TimelineEvent[];
   mods: { w: ClockMods; b: ClockMods };
+  lag: { w: number | null; b: number | null };
+  lagBudget: { w: number; b: number };
 };
 
 function sameSecret(a: string, b: string) {
@@ -152,6 +156,8 @@ export class Rooms {
       cards: withCards && categoryOf(clean) !== "Bullet" ? newCardsState(testHand() ?? dealHand(randomInt)) : null,
       timeline: [],
       mods: { w: { ...NO_MODS }, b: { ...NO_MODS } },
+      lag: { w: null, b: null },
+      lagBudget: { w: LAG_BUDGET.start, b: LAG_BUDGET.start },
     };
     const token = randomBytes(12).toString("hex");
     room.seats[mine] = { token, peer };
@@ -249,7 +255,15 @@ export class Rooms {
     return room.moves.length;
   }
 
-  move(room: Room, side: Side, from: string, to: string, promotion: string | undefined, ply: number) {
+  move(
+    room: Room,
+    side: Side,
+    from: string,
+    to: string,
+    promotion: string | undefined,
+    ply: number,
+    travelMs = 0
+  ) {
     if (room.status === "over") throw new GameError("game_over", "The game is over.");
     if (room.status !== "playing") throw new GameError("not_your_turn", "Waiting for your opponent.");
     if (room.chess.turn() !== side) throw new GameError("not_your_turn", "It's not your turn.");
@@ -270,6 +284,9 @@ export class Rooms {
     const now = this.now();
     if (room.turnStartedAt !== null) {
       this.settle(room);
+      const credit = Math.max(0, Math.min(travelMs, LAG_COMP_MAX_MS, room.lagBudget[side]));
+      room.clock[side] += credit;
+      room.lagBudget[side] = Math.min(LAG_BUDGET.max, room.lagBudget[side] - credit + LAG_BUDGET.perMove);
       if (room.clock[side] <= 0) {
         room.clock[side] = 0;
         this.finish(room, `${NAME[other(side)]} wins on time`);
@@ -460,6 +477,7 @@ export class Rooms {
       cards: room.cards ? structuredClone(room.cards) : null,
       timeline: room.cards ? [...room.timeline] : [],
       mods: this.liveMods(room),
+      lag: { ...room.lag },
     };
   }
 

@@ -27,6 +27,7 @@ import {
   type TimeControl,
 } from "./game/useClocks";
 import OnlineDialog from "./components/OnlineDialog";
+import ConnectionOverlay from "./components/ConnectionOverlay";
 import { inviteLink, linkFromUrl, useOnline } from "./net/useOnline";
 import {
   FIRST_MOVE_MS,
@@ -285,7 +286,7 @@ export default function App() {
   }, [now]);
 
   const left = deadline ? Math.max(0, deadline.at - now) : 0;
-  const leftText = `0:${String(Math.ceil(left / 1000)).padStart(2, "0")}`;
+  const leftText = formatWait(Math.ceil(left / 1000) * 1000);
   let deadlineInfo: { text: string; time: string; urgent: boolean } | null = null;
   if (deadline?.kind === "abort") {
     deadlineInfo = {
@@ -425,6 +426,37 @@ export default function App() {
   const lostRoom = !!online.error && FATAL.includes(online.error.code) && !online.room;
   const ownLinkExpired = online.error?.code === "invite_expired" && !joiningCode;
 
+  const playing = serverState?.status === "playing";
+  const oppAway = onlineMode && playing && serverState ? !serverState.online[them] : false;
+  const [awaySince, setAwaySince] = useState<number | null>(null);
+  const [backNote, setBackNote] = useState<{ text: string; key: number } | null>(null);
+  useEffect(() => {
+    if (oppAway) {
+      setAwaySince(performance.now());
+      return;
+    }
+    if (awaySince !== null && serverState?.online[them]) {
+      setBackNote({ text: "Your opponent is back", key: performance.now() });
+    }
+    setAwaySince(null);
+  }, [oppAway]);
+  useEffect(() => {
+    if (online.recovered) setBackNote({ text: "Back online", key: performance.now() });
+  }, [online.recovered]);
+  useEffect(() => {
+    if (!backNote) return;
+    const id = window.setTimeout(() => setBackNote(null), 2200);
+    return () => window.clearTimeout(id);
+  }, [backNote]);
+  useEffect(() => {
+    if (awaySince === null) return;
+    const id = window.setInterval(() => setNow(performance.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [awaySince]);
+  const awayFor = awaySince !== null ? Math.max(0, Math.floor((performance.now() - awaySince) / 1000)) : 0;
+  const awayText = `${Math.floor(awayFor / 60)}:${String(awayFor % 60).padStart(2, "0")}`;
+  const connectionLost = onlineMode && !!online.room && online.connection !== "open" && !lostRoom;
+
   const review = useReview({
     moves: game.verboseMoves,
     gameId: game.gameId,
@@ -496,6 +528,13 @@ export default function App() {
             low={lowOf(them)}
             captured={takenBy(them)}
             advantage={edgeOf(them)}
+            signal={
+              onlineMode && serverState && serverState.status !== "waiting"
+                ? serverState.online[them]
+                  ? serverState.lag[them]
+                  : "down"
+                : undefined
+            }
           />
 
           <div className={"board-wrap" + (shown ? " is-reviewing" : "")}>
@@ -547,6 +586,24 @@ export default function App() {
               </button>
             )}
 
+            {connectionLost && (
+              <ConnectionOverlay offline={online.offline} retry={online.retryInfo} onRetry={online.retryNow} />
+            )}
+
+            {!connectionLost && oppAway && (
+              <div className="conn-banner" role="status">
+                <span className="conn-dot" aria-hidden="true" />
+                Opponent disconnected · waiting for them <strong>{awayText}</strong>
+              </div>
+            )}
+
+            {!connectionLost && !oppAway && backNote && (
+              <div className="conn-banner is-good" role="status" key={backNote.key}>
+                <span className="conn-dot" aria-hidden="true" />
+                {backNote.text}
+              </div>
+            )}
+
             {cards.reveal && (
               <div className="card-reveal" key={cards.reveal.key}>
                 <span className="card-reveal-who">
@@ -565,6 +622,7 @@ export default function App() {
             low={lowOf(you)}
             captured={takenBy(you)}
             advantage={edgeOf(you)}
+            signal={onlineMode && online.room ? (online.connection === "open" ? online.rtt : "down") : undefined}
           />
         </section>
 

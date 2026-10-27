@@ -29,6 +29,7 @@ export type GameState = {
   cards: CardsState | null;
   timeline: TimelineEvent[];
   mods: { w: ClockMods; b: ClockMods };
+  lag: { w: number | null; b: number | null };
 };
 
 export type ClientMsg =
@@ -37,6 +38,7 @@ export type ClientMsg =
   | { t: "move"; from: string; to: string; promotion?: string; ply: number }
   | { t: "card"; card: CardId; picks: string[]; ply: number }
   | { t: "resign" }
+  | { t: "ping"; n: number }
   | { t: "draw"; action: "offer" | "accept" | "decline" };
 
 export type ServerMsg =
@@ -49,7 +51,8 @@ export type ServerMsg =
       invite?: { key: string; expiresIn: number };
     }
   | { t: "state"; state: GameState; last?: { from: string; to: string; san: string } }
-  | { t: "error"; code: ErrorCode; message: string; state?: GameState };
+  | { t: "error"; code: ErrorCode; message: string; state?: GameState }
+  | { t: "pong"; n: number };
 
 export type ErrorCode =
   | "bad_message"
@@ -78,6 +81,9 @@ export function formatWait(ms: number) {
   const s = Math.round(ms / 1000);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
+
+export const LAG_COMP_MAX_MS = 500;
+export const LAG_BUDGET = { start: 2000, perMove: 250, max: 5000 };
 
 export const INVITE_TTL_MS = 10 * 60 * 1000;
 

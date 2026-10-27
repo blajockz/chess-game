@@ -86,6 +86,19 @@ function yieldToPage() {
 }
 
 type Puzzle = { id: string; bits: number };
+
+const PING_EVERY_MS = 4000;
+const SILENCE_MS = 12000;
+
+export function retryDelay(attempt: number, random = Math.random) {
+  const base = Math.min(10_000, 500 * 2 ** Math.max(0, attempt - 1));
+  return Math.round(base * (0.8 + 0.4 * random()));
+}
+
+function median(list: number[]) {
+  const sorted = [...list].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
 const MAX_POW_RETRIES = 3;
 
 export type Update = {
@@ -103,6 +116,10 @@ export function useOnline() {
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
   const [active, setActive] = useState(false);
   const [invite, setInvite] = useState<{ key: string; expiresAt: number } | null>(null);
+  const [rtt, setRtt] = useState<number | null>(null);
+  const [retryInfo, setRetryInfo] = useState<{ attempt: number; at: number } | null>(null);
+  const [offline, setOffline] = useState(() => typeof navigator !== "undefined" && navigator.onLine === false);
+  const [recovered, setRecovered] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const hello = useRef<ClientMsg | null>(null);
@@ -114,10 +131,23 @@ export function useOnline() {
   const pending = useRef<ClientMsg | null>(null);
   const lastSent = useRef<ClientMsg | null>(null);
   const powRetries = useRef(0);
+  const attempt = useRef(0);
+  const dropped = useRef(false);
+  const rttRef = useRef<number | null>(null);
+  const samples = useRef<number[]>([]);
+  const pingsOut = useRef(new Map<number, number>());
+  const pingN = useRef(0);
+  const lastHeard = useRef(0);
 
   function push(state: GameState, last?: Update["last"]) {
     keyRef.current += 1;
-    setUpdate({ key: keyRef.current, state, last, at: performance.now() });
+    const travel = (rttRef.current ?? 0) / 2;
+    setUpdate({ key: keyRef.current, state, last, at: performance.now() - travel });
+  }
+
+  function retryNow() {
+    if (!wantOpen.current || wsRef.current) return;
+    connect();
   }
 
   async function sendWithWork(ws: WebSocket, msg: ClientMsg) {
@@ -134,6 +164,16 @@ export function useOnline() {
   }
 
   function onMessage(ws: WebSocket, msg: ServerMsg) {
+    if (msg.t === "pong") {
+      const sent = pingsOut.current.get(msg.n);
+      pingsOut.current.delete(msg.n);
+      if (sent !== undefined) {
+        samples.current = [...samples.current, performance.now() - sent].slice(-5);
+        rttRef.current = Math.round(median(samples.current));
+        setRtt(rttRef.current);
+      }
+      return;
+    }
     if (msg.t === "challenge") {
       puzzle.current = { id: msg.id, bits: msg.bits };
       const waiting = pending.current;
@@ -148,6 +188,10 @@ export function useOnline() {
     }
     if (msg.t === "seat") {
       powRetries.current = 0;
+      if (dropped.current) {
+        dropped.current = false;
+        setRecovered((n) => n + 1);
+      }
       roomRef.current = msg.state.room;
       setRoom(msg.state.room);
       setSide(msg.side);
@@ -194,6 +238,9 @@ export function useOnline() {
 
     ws.onopen = () => {
       setConnection("open");
+      attempt.current = 0;
+      setRetryInfo(null);
+      lastHeard.current = performance.now();
       const msg: ClientMsg | null = roomRef.current
         ? { t: "join", room: roomRef.current, ...loadToken(roomRef.current), reclaim: true }
         : hello.current;
@@ -201,25 +248,46 @@ export function useOnline() {
     };
     ws.onmessage = (e) => {
       if (wsRef.current !== ws) return;
+      lastHeard.current = performance.now();
       try {
         onMessage(ws, JSON.parse(String(e.data)) as ServerMsg);
       } catch {
       }
     };
-    ws.onclose = () => {
-      if (wsRef.current !== ws) return;
-      wsRef.current = null;
-      if (!wantOpen.current) {
-        setConnection("off");
+    ws.onclose = (e) => {
+      if (e.code === 1008 && /Banned/i.test(e.reason)) {
+        wantOpen.current = false;
+        window.location.reload();
         return;
       }
-      setConnection("reconnecting");
-      retry.current = window.setTimeout(connect, 1500);
+      lost(ws);
     };
     ws.onerror = () => {
       if (!roomRef.current && !wantOpen.current) return;
       setError({ code: "offline", message: "Can't reach the game server." });
     };
+  }
+
+  function lost(ws: WebSocket) {
+    if (wsRef.current !== ws) return;
+    wsRef.current = null;
+    ws.onclose = null;
+    ws.onmessage = null;
+    try {
+      ws.close();
+    } catch {
+    }
+    if (!wantOpen.current) {
+      setConnection("off");
+      return;
+    }
+    setConnection("reconnecting");
+    if (roomRef.current) dropped.current = true;
+    pingsOut.current.clear();
+    attempt.current += 1;
+    const wait = retryDelay(attempt.current);
+    setRetryInfo({ attempt: attempt.current, at: performance.now() + wait });
+    retry.current = window.setTimeout(connect, wait);
   }
 
   function start(first: ClientMsg) {
@@ -248,6 +316,9 @@ export function useOnline() {
 
   function leave() {
     wantOpen.current = false;
+    attempt.current = 0;
+    dropped.current = false;
+    setRetryInfo(null);
     setActive(false);
     window.clearTimeout(retry.current);
     const ws = wsRef.current;
@@ -268,6 +339,49 @@ export function useOnline() {
     wsRef.current?.close();
   }, []);
 
+  useEffect(() => {
+    if (connection !== "open") return;
+    const id = window.setInterval(() => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (performance.now() - lastHeard.current > SILENCE_MS) {
+        lost(ws);
+        return;
+      }
+      pingN.current += 1;
+      pingsOut.current.set(pingN.current, performance.now());
+      ws.send(JSON.stringify({ t: "ping", n: pingN.current }));
+    }, PING_EVERY_MS);
+    return () => window.clearInterval(id);
+  }, [connection]);
+
+  useEffect(() => {
+    const goOnline = () => {
+      setOffline(false);
+      window.clearTimeout(retry.current);
+      retryNow();
+    };
+    const goOffline = () => {
+      setOffline(true);
+      const ws = wsRef.current;
+      if (ws && wantOpen.current) lost(ws);
+    };
+    const visible = () => {
+      if (document.visibilityState === "visible" && !wsRef.current && wantOpen.current) {
+        window.clearTimeout(retry.current);
+        retryNow();
+      }
+    };
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, []);
+
   return {
     active,
     invite,
@@ -278,6 +392,14 @@ export function useOnline() {
     state: update?.state ?? null,
     error,
     clearError: () => setError(null),
+    rtt,
+    retryInfo,
+    offline,
+    recovered,
+    retryNow: () => {
+      window.clearTimeout(retry.current);
+      retryNow();
+    },
     create,
     join,
     leave,
