@@ -32,6 +32,8 @@ const START_GAP = 0.3;
 
 type Cell = { square: Square; type: string; color: "w" | "b" } | null;
 
+export type BoardProps = Props;
+
 type Props = {
   board: Cell[][];
   selected: Square | null;

@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./theme/themes.css";
 import TopBar from "./components/TopBar";
-import Board from "./components/Board";
+import Board, { type BoardProps } from "./components/Board";
+import Safe3D, { hasWebGL } from "./three/Safe3D";
 import PlayerStrip from "./components/PlayerStrip";
 import MovePanel, { type DrawState } from "./components/MovePanel";
 import WeatherLayer from "./components/WeatherLayer";
@@ -54,7 +55,20 @@ function reviewLabel(ply: number, san: string | undefined) {
 }
 
 export default function App() {
-  const [mode, setMode] = useState<"default" | "sim">("default");
+  const canThree = useMemo(hasWebGL, []);
+  const [mode, setMode] = useState<"default" | "sim">(() => {
+    try {
+      return canThree && localStorage.getItem("tempo.mode") === "sim" ? "sim" : "default";
+    } catch {
+      return "default";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("tempo.mode", mode);
+    } catch {
+    }
+  }, [mode]);
   const [soundOn, setSoundOn] = useState(true);
   const [theme, setTheme] = useState<ThemeId>(loadTheme);
 
@@ -484,6 +498,41 @@ export default function App() {
   }
   if (cards.shieldSquare) effects.push(`Shield on ${cards.shieldSquare}`);
 
+  const boardProps: BoardProps = shown
+    ? {
+        board: shown.board,
+        selected: null,
+        legalTargets: [],
+        lastMove: shown.lastMove,
+        moveKey: 100000 + review.current,
+        checkSquare: shown.checkSquare,
+        flipped: you === "b",
+        draggableColor: null,
+        onSquareClick: review.live,
+      }
+    : {
+        board: game.board,
+        selected: game.selected,
+        legalTargets: game.legalTargets,
+        lastMove: game.lastMove,
+        lastCapture: game.lastCapture,
+        moveKey: game.moveKey,
+        checkSquare: game.checkSquare,
+        matedSquare: game.matedSquare,
+        pending: game.pending,
+        premove: game.premove,
+        premoveFrom: game.premoveFrom,
+        flipped: you === "b",
+        draggableColor: frozen.current || cards.targeting ? null : game.myTurn ? game.turn : player,
+        onPromote: game.choosePromotion,
+        onCancelPromotion: game.cancelPromotion,
+        onSquareClick: cards.targeting ? cards.pick : game.selectSquare,
+        cardTargets: cards.targetSquares,
+        cardPicked: cards.targeting?.picks ?? [],
+        cardFlash: cards.flash,
+        shielded: cards.shieldSquare,
+      };
+
   return (
     <div className="shell">
       <WeatherLayer theme={themeById(theme)} />
@@ -491,6 +540,7 @@ export default function App() {
       <TopBar
         mode={mode}
         onModeChange={setMode}
+        simAvailable={canThree}
         soundOn={soundOn}
         onSoundToggle={() => setSoundOn((on) => !on)}
         control={
@@ -538,45 +588,10 @@ export default function App() {
           />
 
           <div className={"board-wrap" + (shown ? " is-reviewing" : "")}>
-            {shown ? (
-              <Board
-                key={game.gameId}
-                board={shown.board}
-                selected={null}
-                legalTargets={[]}
-                lastMove={shown.lastMove}
-                moveKey={100000 + review.current}
-                checkSquare={shown.checkSquare}
-                flipped={you === "b"}
-                draggableColor={null}
-                onSquareClick={review.live}
-              />
+            {mode === "sim" && canThree ? (
+              <Safe3D props={boardProps} fallback={<Board {...boardProps} />} onFail={() => setMode("default")} />
             ) : (
-              <Board
-                key={game.gameId}
-                board={game.board}
-                selected={game.selected}
-                legalTargets={game.legalTargets}
-                lastMove={game.lastMove}
-                lastCapture={game.lastCapture}
-                moveKey={game.moveKey}
-                checkSquare={game.checkSquare}
-                matedSquare={game.matedSquare}
-                pending={game.pending}
-                premove={game.premove}
-                premoveFrom={game.premoveFrom}
-                flipped={you === "b"}
-                draggableColor={
-                  frozen.current || cards.targeting ? null : game.myTurn ? game.turn : player
-                }
-                onPromote={game.choosePromotion}
-                onCancelPromotion={game.cancelPromotion}
-                onSquareClick={cards.targeting ? cards.pick : game.selectSquare}
-                cardTargets={cards.targetSquares}
-                cardPicked={cards.targeting?.picks ?? []}
-                cardFlash={cards.flash}
-                shielded={cards.shieldSquare}
-              />
+              <Board key={game.gameId} {...boardProps} />
             )}
 
             {shown && (

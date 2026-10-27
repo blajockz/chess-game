@@ -7,6 +7,7 @@ type Mode = "default" | "sim";
 type Props = {
   mode: Mode;
   onModeChange: (mode: Mode) => void;
+  simAvailable?: boolean;
   soundOn: boolean;
   onSoundToggle: () => void;
   control: string;
@@ -18,6 +19,7 @@ type Props = {
 export default function TopBar({
   mode,
   onModeChange,
+  simAvailable = true,
   soundOn,
   onSoundToggle,
   control,
@@ -28,8 +30,8 @@ export default function TopBar({
   return (
     <header className="topbar">
       <div className="identity">
-        <img className="mark" src="/favicon.svg?v=2" alt="" width={34} height={34} />
-        <span className="wordmark">Chess</span>
+        <img className="mark" src="/favicon.svg" alt="" width={34} height={34} />
+        <span className="wordmark">Tempo</span>
       </div>
 
       <div className="modes" role="group" aria-label="Game mode">
@@ -39,7 +41,12 @@ export default function TopBar({
         >
           Default
         </button>
-        <button className="mode" disabled title="Not built yet">
+        <button
+          className={mode === "sim" ? "mode is-on" : "mode"}
+          onClick={() => onModeChange("sim")}
+          disabled={!simAvailable}
+          title={simAvailable ? "Play on a 3D board" : "This browser can't show 3D graphics"}
+        >
           Real-life sim
         </button>
       </div>

@@ -1,0 +1,12 @@
+.board3d-loading {
+  display: grid;
+  place-items: center;
+  width: calc(var(--sq) * 8 + 24px);
+  max-width: 100%;
+  aspect-ratio: 1 / 0.92;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #14100c;
+  color: var(--muted);
+  font-size: 13px;
+}
