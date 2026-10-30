@@ -1,4 +1,5 @@
 import "./PlayerStrip.css";
+import AdminBadge from "./AdminBadge";
 
 type Props = {
   name: string;
@@ -9,6 +10,8 @@ type Props = {
   captured?: string[];
   advantage?: number;
   signal?: number | null | "down";
+  admin?: boolean;
+  badgeTip?: "up" | "down";
 };
 
 function Signal({ value }: { value: number | null | "down" }) {
@@ -43,13 +46,18 @@ export default function PlayerStrip({
   captured = [],
   advantage = 0,
   signal,
+  admin = false,
+  badgeTip = "up",
 }: Props) {
   return (
     <div className="strip">
-      <span className="avatar">{name.charAt(0)}</span>
+      <span className={"avatar" + (admin ? " is-admin" : "")}>{name.charAt(0)}</span>
 
       <div className="who">
-        <span className="who-name">{name}</span>
+        <span className="who-line">
+          <span className="who-name">{name}</span>
+          {admin && <AdminBadge tip={badgeTip} />}
+        </span>
         <span className="who-detail">
           {detail}
           {signal !== undefined && <Signal value={signal} />}

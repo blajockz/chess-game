@@ -53,14 +53,30 @@ export function isPrivate(ip: string) {
 const unknownKeys = new WeakMap<IncomingMessage, string>();
 let warned = false;
 
+function readAddress(req: IncomingMessage): string | null {
+  if (!TRUST_PROXY) {
+    const raw = req.socket.remoteAddress ?? "";
+    const v = raw.startsWith("::ffff:") && isIP(raw.slice(7)) === 4 ? raw.slice(7) : raw;
+    return isIP(v) ? v : null;
+  }
+  const list = headerText(req, IP_HEADER)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const pick = IP_HEADER === "x-forwarded-for" ? list[list.length - PROXY_HOPS] : list[0];
+  if (pick && isIP(pick) && !isPrivate(pick)) return pick.startsWith("::ffff:") ? pick.slice(7) : pick;
+  return null;
+}
+
+export function clientAddress(req: IncomingMessage) {
+  return readAddress(req) ?? "unknown";
+}
+
 export function clientIp(req: IncomingMessage) {
   if (TRUST_PROXY) {
-    const list = headerText(req, IP_HEADER)
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const pick = IP_HEADER === "x-forwarded-for" ? list[list.length - PROXY_HOPS] : list[0];
-    if (pick && isIP(pick) && !isPrivate(pick)) return ipKey(pick);
+    const pick = readAddress(req);
+    if (pick) return ipKey(pick);
+    const list = headerText(req, IP_HEADER).split(",").map((s) => s.trim()).filter(Boolean);
     if (!warned) {
       warned = true;
       console.warn(
@@ -115,6 +131,13 @@ export function originAllowed(req: IncomingMessage) {
   return url.hostname === host.replace(/:\d+$/, "");
 }
 
+const SUPABASE = (() => {
+  const raw = (process.env.SUPABASE_URL ?? "").replace(/\/+$/, "");
+  if (/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(raw)) return " " + raw;
+  if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(raw)) return " " + raw;
+  return "";
+})();
+
 export function securityHeaders(req: IncomingMessage): Record<string, string> {
   const https = isHttps(req);
   const host = safeHost(req);
@@ -126,7 +149,7 @@ export function securityHeaders(req: IncomingMessage): Record<string, string> {
     "style-src 'self' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data:",
-    `connect-src 'self'${socket}${extra}`,
+    `connect-src 'self'${socket}${extra}${SUPABASE}`,
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'none'",

@@ -149,3 +149,27 @@
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+
+.who-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.avatar.is-admin {
+  border-color: transparent;
+  background:
+    linear-gradient(var(--surface-2), var(--surface-2)) padding-box,
+    linear-gradient(135deg, #fde9a0 0%, #c68b27 40%, #5e3907 70%, #f3c95e 100%) border-box;
+  color: #f3c95e;
+  box-shadow: 0 0 0 3px rgba(198, 139, 39, 0.14), 0 0 12px rgba(243, 201, 94, 0.18);
+}
+
+@media (max-width: 480px) {
+  .strip .ab-text {
+    display: none;
+  }
+  .strip .admin-badge {
+    padding: 0 3px;
+  }
+}

@@ -106,3 +106,141 @@
     padding-bottom: 72px;
   }
 }
+
+.account {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 4px 14px;
+}
+
+.account-badge {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--brass-soft);
+  border: 1px solid rgba(184, 145, 79, 0.5);
+  color: var(--brass);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.account-name {
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.account-out {
+  white-space: nowrap;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.account-out:hover {
+  color: var(--text);
+  border-color: var(--brass);
+}
+
+@media (max-width: 720px) {
+  .account {
+    margin: 0 0 0 auto;
+    flex-direction: row;
+    padding: 0;
+  }
+  .account-name {
+    display: none;
+  }
+}
+
+.sb-admin {
+  margin-top: auto;
+  color: #e9bd57;
+  text-decoration: none;
+}
+
+.sb-admin:hover {
+  color: #f6d47a;
+  background: rgba(243, 201, 94, 0.1);
+}
+
+.sb-admin-crest {
+  width: 22px;
+  height: 26px;
+  margin: -2px 0;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 5px rgba(243, 201, 94, 0.3));
+  transition: transform 0.18s ease, filter 0.18s ease;
+}
+
+.sb-admin:hover .sb-admin-crest {
+  transform: translateY(-1px) scale(1.06);
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 8px rgba(243, 201, 94, 0.55));
+}
+
+.sb-admin + .account {
+  margin-top: 0;
+}
+
+.account-avatar {
+  position: relative;
+  display: inline-flex;
+}
+
+.account.is-admin .account-badge {
+  border-color: transparent;
+  background:
+    linear-gradient(#2a2012, #2a2012) padding-box,
+    linear-gradient(135deg, #fde9a0 0%, #c68b27 40%, #5e3907 70%, #f3c95e 100%) border-box;
+  color: #f3c95e;
+  box-shadow: 0 0 10px rgba(243, 201, 94, 0.22);
+}
+
+.account-crest {
+  position: absolute;
+  right: -9px;
+  bottom: -5px;
+}
+
+@media (max-width: 720px) {
+  .sb-admin {
+    margin: 0;
+    width: 96px;
+  }
+  .sb-admin + .account {
+    margin: 0 0 0 auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .account-crest .admin-badge-wrap.tip-right .ab-tip {
+    left: auto;
+    right: -6px;
+    top: auto;
+    bottom: calc(100% + 10px);
+    transform: translateY(4px);
+  }
+  .account-crest .admin-badge-wrap.tip-right:hover .ab-tip,
+  .account-crest .admin-badge-wrap.tip-right:focus-visible .ab-tip {
+    transform: none;
+  }
+  .account-crest .admin-badge-wrap.tip-right .ab-tip::after {
+    left: auto;
+    right: 9px;
+    top: 100%;
+    border-width: 0 1px 1px 0;
+    transform: translateY(-4px) rotate(45deg);
+  }
+}

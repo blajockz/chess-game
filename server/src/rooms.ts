@@ -41,7 +41,8 @@ import { LIMITS } from "./limits.js";
 
 export type Peer = { send: (data: string) => void };
 
-type Seat = { token: string; peer: Peer | null };
+export type SeatUser = { id: string; name: string; admin?: boolean } | null;
+type Seat = { token: string; peer: Peer | null; user: SeatUser };
 
 export type Room = {
   id: string;
@@ -117,7 +118,7 @@ export class Rooms {
     }
   }
 
-  create(control: Control, side: Side | "random", peer: Peer, owner = "local", withCards = false) {
+  create(control: Control, side: Side | "random", peer: Peer, owner = "local", withCards = false, user: SeatUser = null) {
     if (side !== "w" && side !== "b" && side !== "random") {
       throw new GameError("bad_message", "Pick White, Black or Random.");
     }
@@ -160,19 +161,28 @@ export class Rooms {
       lagBudget: { w: LAG_BUDGET.start, b: LAG_BUDGET.start },
     };
     const token = randomBytes(12).toString("hex");
-    room.seats[mine] = { token, peer };
+    room.seats[mine] = { token, peer, user };
     this.rooms.set(room.id, room);
     return { room, side: mine, token };
   }
 
-  join(id: string, token: string | undefined, peer: Peer, reclaim = false, inviteKey?: string) {
+  join(id: string, token: string | undefined, peer: Peer, reclaim = false, inviteKey?: string, user: SeatUser = null) {
     const room = this.get(id);
     if (!room) throw new GameError("no_room", "This game link doesn't exist or has expired.");
     const free = (["w", "b"] as Side[]).find((s) => !room.seats[s]);
 
     for (const side of ["w", "b"] as Side[]) {
       const seat = room.seats[side];
-      if (!seat || !token || !sameSecret(seat.token, token)) continue;
+      if (!seat) continue;
+      if (seat.user && user) {
+        if (seat.user.id !== user.id) continue;
+        const replaced = seat.peer && seat.peer !== peer ? seat.peer : undefined;
+        seat.peer = peer;
+        seat.user = user;
+        room.emptySince = null;
+        return { room, side, token: seat.token, replaced };
+      }
+      if (!token || !sameSecret(seat.token, token)) continue;
       if (seat.peer && !reclaim && free) break;
       const replaced = seat.peer && seat.peer !== peer ? seat.peer : undefined;
       seat.peer = peer;
@@ -192,7 +202,7 @@ export class Rooms {
     room.invite = null;
 
     const newToken = randomBytes(12).toString("hex");
-    room.seats[free] = { token: newToken, peer };
+    room.seats[free] = { token: newToken, peer, user };
     room.emptySince = null;
     if (room.status === "waiting" && room.seats.w && room.seats.b) {
       room.status = "playing";
@@ -470,6 +480,8 @@ export class Rooms {
       clock: this.liveClock(room),
       running: room.status === "playing" && room.turnStartedAt !== null,
       online: { w: !!room.seats.w?.peer, b: !!room.seats.b?.peer },
+      players: { w: room.seats.w?.user?.name ?? null, b: room.seats.b?.user?.name ?? null },
+      admins: { w: room.seats.w?.user?.admin === true, b: room.seats.b?.user?.admin === true },
       result: room.result,
       drawOffer: room.drawOffer,
       drawBlockedUntil: { ...room.drawBlockedUntil },

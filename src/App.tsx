@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import "./theme/themes.css";
 import TopBar from "./components/TopBar";
 import Board, { type BoardProps } from "./components/Board";
@@ -28,6 +28,13 @@ import {
   type TimeControl,
 } from "./game/useClocks";
 import OnlineDialog from "./components/OnlineDialog";
+import AuthScreen from "./auth/AuthScreen";
+import { AuthProvider, useAuth, type Account } from "./auth/AuthProvider";
+import { usePresence } from "./net/usePresence";
+import Suspended from "./auth/Suspended";
+
+const AdminApp = lazy(() => import("./admin/AdminApp"));
+const ADMIN = typeof location !== "undefined" && /^\/admin(\/|$)/.test(location.pathname);
 import ConnectionOverlay from "./components/ConnectionOverlay";
 import { inviteLink, linkFromUrl, useOnline } from "./net/useOnline";
 import {
@@ -55,6 +62,32 @@ function reviewLabel(ply: number, san: string | undefined) {
 }
 
 export default function App() {
+  return (
+    <AuthProvider>
+      <Gate />
+    </AuthProvider>
+  );
+}
+
+function Gate() {
+  const auth = useAuth();
+  const banned = auth.account?.banned ?? null;
+  usePresence(auth.status === "signed_in" && !banned ? (auth.account?.id ?? null) : null);
+  if (auth.status === "loading") return <div className="auth-loading">Loading…</div>;
+  if (auth.status === "recovery") return <AuthScreen recovery />;
+  if (auth.status !== "signed_in" || !auth.account) return <AuthScreen />;
+  if (banned) return <Suspended until={banned.until} reason={banned.reason} />;
+  if (ADMIN) {
+    return (
+      <Suspense fallback={<div className="auth-loading">Loading…</div>}>
+        <AdminApp account={auth.account} />
+      </Suspense>
+    );
+  }
+  return <Game account={auth.account} onSignOut={() => void auth.signOut()} />;
+}
+
+function Game({ account, onSignOut }: { account: Account; onSignOut: () => void }) {
   const canThree = useMemo(hasWebGL, []);
   const [mode, setMode] = useState<"default" | "sim">(() => {
     try {
@@ -553,7 +586,7 @@ export default function App() {
         onThemeChange={setTheme}
       />
 
-      <Sidebar open={setupOpen ? panel : null} onOpen={openPanel} />
+      <Sidebar open={setupOpen ? panel : null} onOpen={openPanel} account={account} onSignOut={onSignOut} />
 
       <main
         className="table"
@@ -571,7 +604,9 @@ export default function App() {
       >
         <section className="board-column">
           <PlayerStrip
-            name="Opponent"
+            name={(onlineMode && serverState?.players?.[them]) || "Opponent"}
+            admin={onlineMode && serverState?.admins?.[them] === true}
+            badgeTip="down"
             detail={opponentDetail()}
             time={timeOf(them)}
             active={clocks.running && game.turn === them}
@@ -630,7 +665,8 @@ export default function App() {
           </div>
 
           <PlayerStrip
-            name="You"
+            name={account.name}
+            admin={account.role === "admin"}
             detail={youDetail()}
             time={timeOf(you)}
             active={clocks.running && game.turn === you}

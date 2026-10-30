@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  CLOSE_BANNED,
+  CLOSE_UNAUTHORIZED,
   DEFAULT_PORT,
   type ClientMsg,
   type Control,
@@ -9,10 +11,11 @@ import {
 } from "../../shared/protocol";
 import { solvePow } from "../../shared/pow";
 import type { CardId } from "../../shared/cards";
+import { accessToken, tokenRejected, wsProtocols } from "../auth/supabase";
 
 export type Connection = "off" | "connecting" | "open" | "reconnecting";
 
-function serverUrl() {
+export function serverUrl() {
   const fromEnv = import.meta.env.VITE_SERVER_URL as string | undefined;
   if (fromEnv) return fromEnv;
   const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -138,6 +141,7 @@ export function useOnline() {
   const pingsOut = useRef(new Map<number, number>());
   const pingN = useRef(0);
   const lastHeard = useRef(0);
+  const attemptId = useRef(0);
 
   function push(state: GameState, last?: Update["last"]) {
     keyRef.current += 1;
@@ -230,11 +234,18 @@ export function useOnline() {
 
   function connect() {
     window.clearTimeout(retry.current);
-    const ws = new WebSocket(serverUrl());
+    const id = ++attemptId.current;
+    setConnection((c) => (c === "open" || c === "reconnecting" ? "reconnecting" : "connecting"));
+    void accessToken().then((token) => {
+      if (id === attemptId.current && wantOpen.current && !wsRef.current) openSocket(token);
+    });
+  }
+
+  function openSocket(token: string | null) {
+    const ws = new WebSocket(serverUrl(), wsProtocols(token));
     wsRef.current = ws;
     puzzle.current = null;
     pending.current = null;
-    setConnection((c) => (c === "open" || c === "reconnecting" ? "reconnecting" : "connecting"));
 
     ws.onopen = () => {
       setConnection("open");
@@ -258,6 +269,17 @@ export function useOnline() {
       if (e.code === 1008 && /Banned/i.test(e.reason)) {
         wantOpen.current = false;
         window.location.reload();
+        return;
+      }
+      if (e.code === CLOSE_BANNED) {
+        window.location.reload();
+        return;
+      }
+      if (e.code === CLOSE_UNAUTHORIZED) {
+        void tokenRejected().then((ok) => {
+          if (ok) lost(ws);
+          else if (wsRef.current === ws) leave();
+        });
         return;
       }
       lost(ws);
@@ -316,6 +338,7 @@ export function useOnline() {
 
   function leave() {
     wantOpen.current = false;
+    attemptId.current += 1;
     attempt.current = 0;
     dropped.current = false;
     setRetryInfo(null);

@@ -1,10 +1,13 @@
 import "./Sidebar.css";
+import AdminBadge, { AdminCrest } from "./AdminBadge";
 
 export type SidebarItem = "bot" | "friend";
 
 type Props = {
   open: SidebarItem | null;
   onOpen: (item: SidebarItem) => void;
+  account?: { name: string; role: "user" | "admin" } | null;
+  onSignOut?: () => void;
 };
 
 function Icon({ kind }: { kind: SidebarItem }) {
@@ -36,7 +39,7 @@ const ITEMS: { id: SidebarItem; label: string; hint: string }[] = [
   { id: "friend", label: "Play a friend", hint: "Create a link and play a friend online" },
 ];
 
-export default function Sidebar({ open, onOpen }: Props) {
+export default function Sidebar({ open, onOpen, account, onSignOut }: Props) {
   return (
     <nav className="sidebar" aria-label="Games">
       {ITEMS.map((item) => (
@@ -52,6 +55,30 @@ export default function Sidebar({ open, onOpen }: Props) {
           <span className="sb-label">{item.label}</span>
         </button>
       ))}
+      {account?.role === "admin" && (
+        <a className="sb-item sb-admin" href="/admin" title="Open the admin dashboard (asks for your password and code)">
+          <AdminCrest className="sb-admin-crest" />
+          <span className="sb-label">Admin panel</span>
+        </a>
+      )}
+      {account && onSignOut && (
+        <div className={"account" + (account.role === "admin" ? " is-admin" : "")} title={account.name}>
+          <span className="account-avatar">
+            <span className="account-badge" aria-hidden="true">
+              {[...account.name][0]?.toUpperCase() ?? "?"}
+            </span>
+            {account.role === "admin" && (
+              <span className="account-crest">
+                <AdminBadge size="sm" label={false} tip="right" />
+              </span>
+            )}
+          </span>
+          <span className="account-name">{account.name}</span>
+          <button className="account-out" onClick={onSignOut}>
+            Sign out
+          </button>
+        </div>
+      )}
     </nav>
   );
 }

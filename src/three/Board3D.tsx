@@ -7,18 +7,13 @@ import { ToneMappingMode } from "postprocessing";
 import * as THREE from "three";
 import type { Square } from "chess.js";
 import type { BoardProps } from "../components/Board";
-import { pieceGeometry, type PieceType } from "./pieces.ts";
-import { BOARD_SIZE, SPECIES, boardMaps, pieceMaterial, plankMaps } from "./materials.ts";
+import { BOARD_SIZE, SPECIES, boardMaps, plankMaps } from "./materials";
+import { TABLE_Y, at, emptyLedger, poses, reconcile } from "./tokens.ts";
+import { Impacts, PieceToken } from "./Animated";
 
 type Quality = "high" | "low";
 
 const FILES = "abcdefgh";
-
-function at(square: string): [number, number] {
-  const f = FILES.indexOf(square[0]);
-  const r = Number(square[1]);
-  return [f - 3.5, 4.5 - r];
-}
 
 const ALL_SQUARES: Square[] = [];
 for (let r = 8; r >= 1; r--) for (const f of FILES) ALL_SQUARES.push((f + r) as Square);
@@ -99,7 +94,7 @@ function Table() {
     });
   }, []);
   return (
-    <mesh rotation-x={-Math.PI / 2} position-y={-0.36} receiveShadow material={mat}>
+    <mesh rotation-x={-Math.PI / 2} position-y={TABLE_Y} receiveShadow material={mat}>
       <planeGeometry args={[40, 40]} />
     </mesh>
   );
@@ -151,26 +146,6 @@ function ChessBoard() {
     };
   }, []);
   return <mesh geometry={geometry} material={materials} receiveShadow castShadow />;
-}
-
-type Cell = BoardProps["board"][number][number];
-
-const MATERIALS = { w: pieceMaterial("w"), b: pieceMaterial("b") };
-
-function Piece({ cell, onPick }: { cell: NonNullable<Cell>; onPick: (sq: Square, e: ThreeEvent<MouseEvent>) => void }) {
-  const [x, z] = at(cell.square);
-  const turn = cell.type === "n" ? (cell.color === "w" ? Math.PI / 2 : -Math.PI / 2) + 0.95 : 0;
-  return (
-    <mesh
-      geometry={pieceGeometry(cell.type as PieceType)}
-      material={MATERIALS[cell.color]}
-      position={[x, 0, z]}
-      rotation-y={turn}
-      castShadow
-      receiveShadow
-      onClick={(e) => onPick(cell.square, e)}
-    />
-  );
 }
 
 function Tint({ square, color, opacity, inset = 0 }: { square: string; color: string; opacity: number; inset?: number }) {
@@ -227,6 +202,17 @@ function Scene(props: BoardProps & { resetKey: number; quality: Quality }) {
     resetKey,
     quality,
   } = props;
+
+  const ledger = useRef(emptyLedger());
+  const calm = useMemo(() => !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches, []);
+  const pieces = useMemo(() => {
+    ledger.current = reconcile(ledger.current, board, lastMove, performance.now() / 1000, !calm);
+    return ledger.current;
+  }, [board, lastMove, calm]);
+  const where = useMemo(() => poses(pieces.tokens), [pieces]);
+  useEffect(() => {
+    if (import.meta.env.DEV) (window as unknown as { __tokens3d?: unknown }).__tokens3d = pieces.tokens;
+  }, [pieces]);
 
   const occupied = new Set<string>();
   for (const row of board) for (const c of row) if (c) occupied.add(c.square);
@@ -315,7 +301,10 @@ function Scene(props: BoardProps & { resetKey: number; quality: Quality }) {
       ))}
 
       <HitAreas onPick={pick} />
-      {board.flat().map((cell) => cell && <Piece key={cell.square} cell={cell} onPick={pick} />)}
+      {pieces.tokens.map((t) => (
+        <PieceToken key={t.id} token={t} target={where.get(t.id)!} lifted={!!t.square && t.square === selected} onPick={pick} />
+      ))}
+      <Impacts impacts={pieces.impacts} />
     </>
   );
 }
@@ -356,7 +345,7 @@ export default function Board3D(props: BoardProps) {
         shadows
         dpr={quality === "high" ? [1, 2] : 1}
         frameloop="demand"
-        camera={{ fov: 32, near: 0.1, far: 80, position: homeView(!!props.flipped).position.toArray() }}
+        camera={{ fov: 37, near: 0.1, far: 80, position: homeView(!!props.flipped).position.toArray() }}
         gl={{ antialias: false, toneMapping: THREE.NoToneMapping, powerPreference: "high-performance" }}
       >
         <PerformanceMonitor onDecline={() => setQuality("low")} flipflops={2} />

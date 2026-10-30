@@ -4,15 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+  "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
+  "start": "tsx src/index.ts",
+  "check": "tsc --noEmit"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.2",
     "@react-three/postprocessing": "^3.2.2",
+    "@supabase/supabase-js": "^2.117.3",
     "chess.js": "^1.4.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

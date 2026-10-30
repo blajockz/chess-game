@@ -22,6 +22,8 @@ export type GameState = {
   clock: { w: number; b: number };
   running: boolean;
   online: { w: boolean; b: boolean };
+  players: { w: string | null; b: string | null };
+  admins: { w: boolean; b: boolean };
   result: string | null;
   drawOffer: Side | null;
   drawBlockedUntil: { w: number; b: number };
@@ -91,3 +93,7 @@ export const ROOM_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 export const ROOM_LENGTH = 6;
 
 export const DEFAULT_PORT = 8787;
+
+export const CLOSE_UNAUTHORIZED = 4001;
+
+export const CLOSE_BANNED = 4003;
