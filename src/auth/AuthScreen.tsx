@@ -1,6 +1,6 @@
 import "./AuthScreen.css";
-import { useState, type FormEvent } from "react";
-import { friendlyError, returnUrl, supabase } from "./supabase";
+import { useEffect, useState, type FormEvent } from "react";
+import { LINK_MINUTES, RESEND_WAIT_S, friendlyError, linkLifetime, returnUrl, supabase, takeLinkFailure } from "./supabase";
 import { useAuth } from "./AuthProvider";
 
 type Mode = "signin" | "signup" | "forgot" | "reset";
@@ -34,6 +34,72 @@ function passwordProblem(p: string) {
   return missing.length ? "Your password needs: " + missing.map((r) => r.label.toLowerCase()).join(", ") + "." : "";
 }
 
+type Sent = { kind: "signup" | "reset"; email: string; at: number; again: boolean };
+
+function clock(ms: number) {
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function left(ms: number) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  if (s > 3600) return `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")} min`;
+  if (s >= 60) return `${Math.ceil(s / 60)} min`;
+  return `${s} s`;
+}
+
+function LinkNotice({ sent, onResend, busy }: { sent: Sent; onResend: () => void; busy: boolean }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const expires = sent.at + LINK_MINUTES * 60_000;
+  const expired = now >= expires;
+  const wait = sent.at + RESEND_WAIT_S * 1000 - now;
+  const what = sent.kind === "signup" ? "confirm your account" : "choose a new password";
+  return (
+    <div className={"auth-notice auth-link-notice" + (expired ? " is-expired" : "")} role="status">
+      <p className="auth-link-main">
+        {sent.kind === "signup" ? (
+          <>
+            {sent.again ? "New link sent" : "Almost done! We sent a link"} to <strong>{sent.email}</strong>. Open it to {what}, then sign in.
+          </>
+        ) : (
+          <>
+            {sent.again ? "New link sent." : "Reset link on its way."} If an account uses <strong>{sent.email}</strong>, open the link to {what}.
+          </>
+        )}
+      </p>
+      <div className="auth-expiry">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <circle cx="12" cy="13" r="8" fill="none" stroke="currentColor" strokeWidth="1.7" />
+          <path d="M12 9v4l2.5 2M9.5 3h5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        </svg>
+        {expired ? (
+          <span>
+            <strong>This link has expired.</strong> Ask for a new one.
+          </span>
+        ) : (
+          <span>
+            Works <strong>once</strong>, until <strong>{clock(expires)}</strong> ({left(expires - now)} left)
+          </span>
+        )}
+      </div>
+      {!expired && (
+        <div className="auth-expiry-bar" aria-hidden="true">
+          <span style={{ width: `${Math.max(0, Math.min(100, ((expires - now) / (LINK_MINUTES * 60_000)) * 100))}%` }} />
+        </div>
+      )}
+      <p className="auth-link-help">
+        Each link works for {linkLifetime()}. Nothing arrived? Check your spam folder. Asking for a new link cancels the previous one.
+      </p>
+      <button type="button" className="auth-link auth-resend" onClick={onResend} disabled={busy || wait > 0}>
+        {wait > 0 ? `Send a new link in ${left(wait)}` : busy ? "Sending…" : "Send a new link"}
+      </button>
+    </div>
+  );
+}
+
 export default function AuthScreen({ recovery = false }: { recovery?: boolean }) {
   const { finishRecovery } = useAuth();
   const [mode, setMode] = useState<Mode>(recovery ? "reset" : "signin");
@@ -43,13 +109,36 @@ export default function AuthScreen({ recovery = false }: { recovery?: boolean })
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [sent, setSent] = useState<Sent | null>(null);
+
+  useEffect(() => {
+    const problem = takeLinkFailure();
+    if (problem) setError(problem);
+  }, []);
 
   function go(next: Mode) {
     setMode(next);
     setError("");
-    setNotice("");
+    setSent(null);
     setPassword("");
+  }
+
+  async function resend() {
+    if (!supabase || !sent || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const { error: err } =
+        sent.kind === "signup"
+          ? await supabase.auth.resend({ type: "signup", email: sent.email, options: { emailRedirectTo: returnUrl() } })
+          : await supabase.auth.resetPasswordForEmail(sent.email, { redirectTo: returnUrl() });
+      if (err) setError(friendlyError(err));
+      else setSent({ ...sent, at: Date.now(), again: true });
+    } catch (err) {
+      setError(friendlyError(err as Error));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function google() {
@@ -70,7 +159,7 @@ export default function AuthScreen({ recovery = false }: { recovery?: boolean })
     e.preventDefault();
     if (!supabase || busy) return;
     setError("");
-    setNotice("");
+    setSent(null);
 
     const mail = email.trim().toLowerCase();
     if (mode !== "reset" && (!EMAIL.test(mail) || mail.includes(".."))) {
@@ -102,13 +191,13 @@ export default function AuthScreen({ recovery = false }: { recovery?: boolean })
           setError("An account already uses this email. Sign in instead, or use “Forgot it?” to reset the password.");
         }
         else if (!data.session) {
-          setNotice(`Almost done! We sent a link to ${mail}. Open it to confirm your account, then sign in.`);
+          setSent({ kind: "signup", email: mail, at: Date.now(), again: false });
           setPassword("");
         }
       } else if (mode === "forgot") {
         const { error: err } = await supabase.auth.resetPasswordForEmail(mail, { redirectTo: returnUrl() });
         if (err) setError(friendlyError(err));
-        else setNotice(`If an account uses ${mail}, a reset link is on its way.`);
+        else setSent({ kind: "reset", email: mail, at: Date.now(), again: false });
       } else {
         const { error: err } = await supabase.auth.updateUser({ password });
         if (err) setError(friendlyError(err));
@@ -247,11 +336,7 @@ export default function AuthScreen({ recovery = false }: { recovery?: boolean })
               {error}
             </p>
           )}
-          {notice && (
-            <p className="auth-notice" role="status">
-              {notice}
-            </p>
-          )}
+          {sent && <LinkNotice sent={sent} onResend={() => void resend()} busy={busy} />}
 
           <button className="auth-submit" type="submit" disabled={busy}>
             {busy ? "Please wait…" : buttons[mode]}
