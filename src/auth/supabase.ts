@@ -66,6 +66,41 @@ export function returnUrl() {
   return url.toString();
 }
 
+export const LINK_MINUTES = Math.max(1, Math.round(Number(import.meta.env.VITE_EMAIL_LINK_MINUTES) || 60));
+
+export const RESEND_WAIT_S = 60;
+
+export function linkLifetime(minutes = LINK_MINUTES) {
+  if (minutes % 60 === 0) return minutes === 60 ? "1 hour" : `${minutes / 60} hours`;
+  return `${minutes} minutes`;
+}
+
+const linkFailure = (() => {
+  if (typeof window === "undefined") return null;
+  const query = new URLSearchParams(window.location.search);
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const code = query.get("error_code") ?? hash.get("error_code");
+  const error = query.get("error") ?? hash.get("error");
+  if (!code && !error) return null;
+  const description = query.get("error_description") ?? hash.get("error_description") ?? "";
+  const url = new URL(window.location.href);
+  for (const key of ["error", "error_code", "error_description", "sb"]) url.searchParams.delete(key);
+  if (hash.has("error") || hash.has("error_code")) url.hash = "";
+  try {
+    window.history.replaceState(window.history.state, "", url.toString());
+  } catch {
+  }
+  return { code: code ?? error ?? "", description };
+})();
+
+export function takeLinkFailure() {
+  if (!linkFailure) return "";
+  if (linkFailure.code === "otp_expired" || /expired|invalid/i.test(linkFailure.description)) {
+    return `This email link has expired or was already used. Links work once, for ${linkLifetime()}. Ask for a new one below.`;
+  }
+  return "This email link didn't work" + (linkFailure.description ? `: ${linkFailure.description.slice(0, 160)}` : ".") + " Ask for a new one below.";
+}
+
 export function friendlyError(err: { message?: string; status?: number; code?: string } | null | undefined) {
   if (!err) return "";
   const m = (err.message ?? "").toLowerCase();
