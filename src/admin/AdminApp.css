@@ -507,3 +507,17 @@
     display: none;
   }
 }
+
+.adm-pill.is-guest {
+  border: 1px dashed rgba(201, 180, 138, 0.55);
+  background: transparent;
+  color: #c9b48a;
+}
+
+.adm-who,
+.adm-ips {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}

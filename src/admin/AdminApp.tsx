@@ -219,11 +219,12 @@ function Login({ email, note, onDone }: { email: string; note: string; onDone: (
   );
 }
 
-type Tab = "overview" | "online" | "users" | "email" | "logs" | "audit";
+type Tab = "overview" | "online" | "users" | "guests" | "email" | "logs" | "audit";
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "online", label: "Online now" },
   { id: "users", label: "Users" },
+  { id: "guests", label: "Guests" },
   { id: "email", label: "Email" },
   { id: "logs", label: "Logs" },
   { id: "audit", label: "Audit" },
@@ -301,6 +302,7 @@ function Panel({ account, onLock }: { account: Account; onLock: (message: string
         {tab === "overview" && <Overview act={act} />}
         {tab === "online" && <Online act={act} />}
         {tab === "users" && <Users act={act} me={account.id} />}
+        {tab === "guests" && <Guests act={act} />}
         {tab === "email" && (
           <section>
             <div className="adm-head">
@@ -399,6 +401,7 @@ function Overview({ act }: { act: Act }) {
     ["pages", "Page loads (24 h)"],
     ["users", "Accounts"],
     ["signups", "New accounts (24 h)"],
+    ["guests", "New guests (24 h)"],
     ["bans", "Active bans"],
     ["blocked", "Blocked (Tor/VPN, 24 h)"],
     ["authFailed", "Refused tokens (24 h)"],
@@ -466,7 +469,16 @@ function Online({ act }: { act: Act }) {
         rows={data?.rows ?? []}
         empty="Nobody is connected right now."
         columns={[
-          ["name", "Player"],
+          [
+            "name",
+            "Player",
+            (r) => (
+              <span className="adm-who">
+                {text(r.name)}
+                {r.guest === true && <span className="adm-pill is-guest">Guest</span>}
+              </span>
+            ),
+          ],
           ["ip", "IP address", (r) => <code>{text(r.ip)}</code>],
           ["country", "Country"],
           ["room", "In game"],
@@ -659,7 +671,141 @@ function Users({ act, me }: { act: Act; me: string }) {
   );
 }
 
-function BanDialog({ user, onCancel, onBan }: { user: Row; onCancel: () => void; onBan: (minutes: number | null, reason: string) => void }) {
+function bannedNow(r: Row) {
+  return !!r.banned_until && Date.parse(String(r.banned_until)) > Date.now();
+}
+
+function Guests({ act }: { act: Act }) {
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState({ q: "", filter: "all" });
+  const { data, error, busy, reload } = useLoad(
+    () => act<{ rows: Row[] }>("guests", { q: search.q || undefined, filter: search.filter }),
+    [search]
+  );
+  const [banning, setBanning] = useState<Row | null>(null);
+  const [message, setMessage] = useState("");
+
+  async function run(label: string, op: string, args: Record<string, unknown>) {
+    setMessage("");
+    try {
+      const res = await act<{ ips?: number; kicked?: number }>(op, args);
+      setMessage(label.replace("{ips}", String(res.ips ?? 0)));
+      await reload();
+    } catch (err) {
+      setMessage((err as Error).message);
+    }
+  }
+
+  return (
+    <section>
+      <div className="adm-head">
+        <h2>Guests</h2>
+        <form
+          className="adm-filters"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setSearch({ q: q.trim(), filter });
+          }}
+        >
+          <input placeholder="guest name or IP address" value={q} onChange={(e) => setQ(e.target.value)} name="guestq" />
+          <select value={filter} onChange={(e) => setFilter(e.target.value)} name="guestfilter">
+            <option value="all">All guests</option>
+            <option value="banned">Banned</option>
+          </select>
+          <button className="adm-btn" disabled={busy}>
+            Search
+          </button>
+        </form>
+      </div>
+      <p className="adm-muted">
+        Guests play without an account. Each one is tied to every address it played from. Banning a guest also bans its addresses
+        from guest play (accounts on those addresses can still sign in).
+      </p>
+      {error && <p className="adm-error">{error}</p>}
+      {message && <p className="adm-notice">{message}</p>}
+      <Table
+        rows={data?.rows ?? []}
+        empty="No guests found."
+        columns={[
+          ["name", "Name", (r) => <code>{text(r.name)}</code>],
+          ["last_ip", "Last IP", (r) => <code>{text(r.last_ip)}</code>],
+          [
+            "ips",
+            "Addresses",
+            (r) => {
+              const ips = Array.isArray(r.ips) ? (r.ips as string[]) : [];
+              const banned = Array.isArray(r.ip_bans) ? (r.ip_bans as string[]) : [];
+              return (
+                <span className="adm-ips" title={ips.join("\n")}>
+                  {ips.length}
+                  {banned.length > 0 && <span className="adm-pill is-banned">{banned.length} banned</span>}
+                </span>
+              );
+            },
+          ],
+          ["country", "Country"],
+          ["created_at", "Created", (r) => when(r.created_at)],
+          ["last_seen_at", "Last seen", (r) => when(r.last_seen_at)],
+          [
+            "banned_until",
+            "Status",
+            (r) =>
+              bannedNow(r) ? (
+                <span className="adm-pill is-banned" title={text(r.ban_reason)}>
+                  Banned {new Date(String(r.banned_until)).getFullYear() >= 9999 ? "forever" : "until " + when(r.banned_until)}
+                </span>
+              ) : (
+                <span className="adm-pill">Active</span>
+              ),
+          ],
+          ["user_agent", "Browser", (r) => <span className="adm-ua">{text(r.user_agent)}</span>],
+          [
+            "actions",
+            "",
+            (r) => (
+              <span className="adm-actions">
+                {bannedNow(r) || (Array.isArray(r.ip_bans) && r.ip_bans.length > 0) ? (
+                  <button className="adm-mini" onClick={() => void run("Ban lifted ({ips} addresses freed).", "unbanGuest", { id: r.id })}>
+                    Unban
+                  </button>
+                ) : (
+                  <button className="adm-mini is-danger" onClick={() => setBanning(r)}>
+                    Ban
+                  </button>
+                )}
+              </span>
+            ),
+          ],
+        ]}
+      />
+      {banning && (
+        <BanDialog
+          user={{ display_name: banning.name }}
+          note={`Also bans its ${Array.isArray(banning.ips) ? banning.ips.length : 0} address(es) from guest play.`}
+          onCancel={() => setBanning(null)}
+          onBan={(minutes, reason) => {
+            const id = banning.id;
+            setBanning(null);
+            void run("Guest banned, with {ips} address(es).", "banGuest", { id, minutes, reason });
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function BanDialog({
+  user,
+  note,
+  onCancel,
+  onBan,
+}: {
+  user: Row;
+  note?: string;
+  onCancel: () => void;
+  onBan: (minutes: number | null, reason: string) => void;
+}) {
   const [choice, setChoice] = useState(1);
   const [reason, setReason] = useState("");
   const [amount, setAmount] = useState("2");
@@ -678,6 +824,7 @@ function BanDialog({ user, onCancel, onBan }: { user: Row; onCancel: () => void;
         }}
       >
         <h2>Ban {text(user.display_name)}</h2>
+        {note && <p className="adm-muted">{note}</p>}
         <label className="adm-field">
           <span>Duration</span>
           <select value={choice} onChange={(e) => setChoice(Number(e.target.value))} name="duration">
@@ -898,6 +1045,8 @@ const KINDS = [
   "game_create",
   "game_join",
   "game_refused",
+  "guest_created",
+  "guest_refused",
   "blocked",
   "banned",
   "rate_limited",

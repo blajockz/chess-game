@@ -25,6 +25,7 @@ export type Player = {
   amr: AuthMethod[];
   iat: number;
   admin?: boolean;
+  guest?: boolean;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -87,6 +88,7 @@ export function bearer(req: IncomingMessage) {
 
 export const WS_PROTOCOL = "tempo";
 const TOKEN_PREFIX = "jwt.";
+const GUEST_PREFIX = "guest.";
 
 export function wsToken(req: IncomingMessage) {
   const list = String(req.headers["sec-websocket-protocol"] ?? "")
@@ -95,4 +97,13 @@ export function wsToken(req: IncomingMessage) {
   if (!list.includes(WS_PROTOCOL)) return null;
   const item = list.find((s) => s.startsWith(TOKEN_PREFIX));
   return item ? item.slice(TOKEN_PREFIX.length) : null;
+}
+
+export function wsGuestToken(req: IncomingMessage) {
+  const list = String(req.headers["sec-websocket-protocol"] ?? "")
+    .split(",")
+    .map((s) => s.trim());
+  if (!list.includes(WS_PROTOCOL)) return null;
+  const item = list.find((s) => s.startsWith(GUEST_PREFIX));
+  return item ? item.slice(GUEST_PREFIX.length) : null;
 }

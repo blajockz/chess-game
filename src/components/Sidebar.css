@@ -244,3 +244,25 @@
     transform: translateY(-4px) rotate(45deg);
   }
 }
+
+.account.is-guest .account-badge {
+  border-style: dashed;
+  background: transparent;
+}
+
+.account-tag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 720px) {
+  .account-tag {
+    display: none;
+  }
+}

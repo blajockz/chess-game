@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { dropGuest, savedGuest } from "./guest.ts";
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
@@ -41,13 +42,21 @@ export const supabase =
       })
     : null;
 
-export async function accessToken(): Promise<string | null> {
+async function sessionToken() {
   if (!supabase) return null;
   const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? null;
 }
 
+export async function accessToken(): Promise<string | null> {
+  return (await sessionToken()) ?? savedGuest()?.token ?? null;
+}
+
 export async function tokenRejected(): Promise<boolean> {
+  if (!(await sessionToken()) && savedGuest()) {
+    dropGuest();
+    return false;
+  }
   if (!supabase) return false;
   const { error } = await supabase.auth.refreshSession();
   if (!error) return true;
@@ -56,7 +65,8 @@ export async function tokenRejected(): Promise<boolean> {
 }
 
 export function wsProtocols(token: string | null) {
-  return token ? ["tempo", "jwt." + token] : ["tempo"];
+  if (!token) return ["tempo"];
+  return token.startsWith("g1.") ? ["tempo", "guest." + token] : ["tempo", "jwt." + token];
 }
 
 export function returnUrl() {

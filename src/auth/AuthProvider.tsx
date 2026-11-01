@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { AUTH_OFF, supabase } from "./supabase";
+import { becomeGuest, checkGuest, dropGuest, onGuestChange, savedGuest, type GuestPass } from "./guest";
 
 export type Role = "user" | "admin";
 
@@ -10,6 +11,7 @@ export type Account = {
   name: string;
   role: Role;
   banned: { until: string; reason: string | null } | null;
+  guest?: boolean;
 };
 
 type AuthState = {
@@ -17,6 +19,7 @@ type AuthState = {
   account: Account | null;
   signOut: () => Promise<void>;
   finishRecovery: () => void;
+  playAsGuest: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState>({
@@ -24,6 +27,7 @@ const AuthContext = createContext<AuthState>({
   account: null,
   signOut: async () => {},
   finishRecovery: () => {},
+  playAsGuest: async () => {},
 });
 
 export function useAuth() {
@@ -31,6 +35,10 @@ export function useAuth() {
 }
 
 const TEST_ACCOUNT: Account = { id: "test", email: null, name: "You", role: "user", banned: null };
+
+function guestAccount(pass: GuestPass, banned: Account["banned"] = null): Account {
+  return { id: pass.id, email: null, name: pass.name, role: "user", banned, guest: true };
+}
 
 function fallbackName(session: Session) {
   const meta = session.user.user_metadata ?? {};
@@ -77,19 +85,51 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [status, setStatus] = useState<AuthState["status"]>(AUTH_OFF ? "signed_in" : supabase ? "loading" : "signed_out");
+  const [status, setStatus] = useState<AuthState["status"]>(AUTH_OFF ? "signed_in" : "loading");
   const [account, setAccount] = useState<Account | null>(AUTH_OFF ? TEST_ACCOUNT : null);
 
   useEffect(() => {
-    if (AUTH_OFF || !supabase) return;
+    if (AUTH_OFF) return;
     let alive = true;
-    const apply = async (session: Session | null, recovery = false) => {
-      if (!session) {
+    const applyGuest = async () => {
+      const pass = savedGuest();
+      if (!pass) {
         if (alive) {
           setAccount(null);
           setStatus("signed_out");
         }
         return;
+      }
+      if (alive) {
+        setAccount(guestAccount(pass));
+        setStatus("signed_in");
+      }
+      const check = await checkGuest(pass);
+      if (!alive || savedGuest()?.id !== pass.id) return;
+      if (!check.ok) {
+        dropGuest();
+        return;
+      }
+      if (check.banned) setAccount(guestAccount(pass, check.banned));
+    };
+    const stopGuest = onGuestChange(() => void applyGuest());
+    if (!supabase) {
+      void applyGuest();
+      return () => {
+        alive = false;
+        stopGuest();
+      };
+    }
+    const apply = async (session: Session | null, recovery = false) => {
+      if (!session) {
+        await applyGuest();
+        return;
+      }
+      if (savedGuest()) {
+        try {
+          localStorage.removeItem("tempo.guest");
+        } catch {
+        }
       }
       const acc = await loadAccount(session);
       if (!alive) return;
@@ -115,6 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     return () => {
       alive = false;
+      stopGuest();
       data.subscription.unsubscribe();
     };
   }, []);
@@ -123,10 +164,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     status,
     account,
     signOut: async () => {
+      if (account?.guest) {
+        dropGuest();
+        return;
+      }
       if (!supabase) return;
       await supabase.auth.signOut();
     },
     finishRecovery: () => setStatus("signed_in"),
+    playAsGuest: async () => {
+      const pass = await becomeGuest();
+      setAccount(guestAccount(pass));
+      setStatus("signed_in");
+    },
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

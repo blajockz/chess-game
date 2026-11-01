@@ -5,6 +5,7 @@ import { LOGS_ON, banEnd, forgetProfile, logEvent, origin, profileOf, rest } fro
 import { clientIp, securityHeaders } from "./security.js";
 import { RateLimiter } from "./limits.js";
 import { MAIL_ON, cleanSubject, jobStatus, mailStatus, startJob, type Recipient } from "./mail.js";
+import { forgetGuest, forgetIp } from "./guests.js";
 
 const MIN = 60_000;
 const IDLE_MS = Number(process.env.ADMIN_IDLE_MS) || 15 * MIN;
@@ -30,9 +31,10 @@ const calls = new RateLimiter(120, 2);
 
 type Hooks = {
   kickUser: (userId: string, code: number, reason: string) => number;
+  kickGuestsFrom: (ips: string[], code: number, reason: string) => number;
   online: () => unknown[];
 };
-let hooks: Hooks = { kickUser: () => 0, online: () => [] };
+let hooks: Hooks = { kickUser: () => 0, kickGuestsFrom: () => 0, online: () => [] };
 export function setAdminHooks(h: Hooks) {
   hooks = h;
 }
@@ -318,6 +320,23 @@ const groupMails = new RateLimiter(3, 3 / 3600);
 const singleMails = new RateLimiter(30, 30 / 3600);
 const MAX_RECIPIENTS = 500;
 
+async function targetGuest(id: string) {
+  const rows = await getRows(`guests?id=eq.${id}&select=id,name,ips,banned_until`);
+  if (!rows[0]) throw new AdminError("not_found", "This guest doesn't exist.");
+  return rows[0] as { id: string; name: string; ips: string[] | null; banned_until: string | null };
+}
+
+function banMinutes(a: Record<string, unknown>) {
+  const permanent = a.minutes === null || a.hours === null;
+  return permanent
+    ? null
+    : a.minutes !== undefined
+      ? int(a.minutes, 5, 365 * 24 * 60, 60)
+      : int(a.hours, 1, 365 * 24, 24) * 60;
+}
+
+const IP_KEY = /^[0-9a-f.:/]{3,45}$/i;
+
 async function targetProfile(id: string) {
   const rows = await getRows(`profiles?id=eq.${id}&select=id,email,display_name,role,banned_until`);
   if (!rows[0]) throw new AdminError("not_found", "This user doesn't exist.");
@@ -336,7 +355,7 @@ async function runOp(req: IncomingMessage, s: AdminSession, player: Player, op: 
     case "overview": {
       const day = new Date(Date.now() - 24 * 60 * MIN).toISOString();
       const now = new Date().toISOString();
-      const [users, signups, bans, pages, blocked, authFailed, denied, visitors] = await Promise.all([
+      const [users, signups, bans, pages, blocked, authFailed, denied, visitors, guests] = await Promise.all([
         count("profiles"),
         count(`profiles?created_at=gte.${day}`),
         count(`profiles?banned_until=gt.${now}`),
@@ -345,8 +364,9 @@ async function runOp(req: IncomingMessage, s: AdminSession, player: Player, op: 
         count(`access_log?kind=eq.auth_failed&at=gte.${day}`),
         count(`access_log?kind=eq.admin_denied&at=gte.${day}`),
         count(`visitors?last_seen=gte.${day}`, "ip").catch(() => 0),
+        count(`guests?created_at=gte.${day}`).catch(() => 0),
       ]);
-      return { online: hooks.online().length, users, signups, bans, pages, blocked, authFailed, denied, visitors };
+      return { online: hooks.online().length, users, signups, bans, pages, blocked, authFailed, denied, visitors, guests };
     }
 
     case "online":
@@ -386,6 +406,68 @@ async function runOp(req: IncomingMessage, s: AdminSession, player: Player, op: 
       return { rows: rows.map((r) => ({ ...r, email: maskEmail(r.email as string | null) })) };
     }
 
+    case "guests": {
+      const limit = int(a.limit, 1, 100, 50);
+      const offset = int(a.offset, 0, 100_000, 0);
+      const parts = [
+        "select=id,name,created_at,last_seen_at,first_ip,last_ip,ips,country,user_agent,banned_until,ban_reason",
+        "order=created_at.desc",
+        `limit=${limit}`,
+        `offset=${offset}`,
+      ];
+      const q = searchText(a.q);
+      if (q && /^[0-9a-f.:/]+$/i.test(q) && /[.:]/.test(q)) parts.push(`ips=cs.${encodeURIComponent(`{"${q}"}`)}`);
+      else if (q) parts.push(`name=ilike.*${encodeURIComponent(q)}*`);
+      if (a.filter === "banned") parts.push(`banned_until=gt.${new Date().toISOString()}`);
+      const rows = await getRows("guests?" + parts.join("&"));
+      const ids = rows.map((r) => r.id as string);
+      const bans = ids.length
+        ? await getRows(`ip_bans?guest_id=in.(${ids.join(",")})&banned_until=gt.${new Date().toISOString()}&select=ip,guest_id,banned_until`)
+        : [];
+      return { rows: rows.map((r) => ({ ...r, ip_bans: bans.filter((b) => b.guest_id === r.id).map((b) => b.ip) })) };
+    }
+
+    case "banGuest": {
+      stepUp(player);
+      const id = uuid(a.id);
+      const reason = typeof a.reason === "string" ? a.reason.trim().slice(0, 200) : "";
+      if (reason.length < 3) throw new AdminError("bad_args", "Give a reason (at least 3 characters).");
+      const minutes = banMinutes(a);
+      const withIps = a.ips !== false;
+      const guest = await targetGuest(id);
+      const until = minutes === null ? "9999-12-31T00:00:00.000Z" : new Date(Date.now() + minutes * MIN).toISOString();
+      const ips = withIps ? (guest.ips ?? []).filter((ip) => IP_KEY.test(ip)) : [];
+      await audit(req, player.id, "ban_guest", id, { name: guest.name, minutes, reason, until, ips });
+      await rest("PATCH", `guests?id=eq.${id}`, { banned_until: until, ban_reason: reason });
+      if (ips.length) {
+        const existing = await getRows(`ip_bans?ip=in.(${ips.map((ip) => `"${ip}"`).join(",")})&select=ip,banned_until`);
+        const rows = ips
+          .filter((ip) => {
+            const old = existing.find((e) => e.ip === ip);
+            return !old || Date.parse(String(old.banned_until)) < Date.parse(until);
+          })
+          .map((ip) => ({ ip, banned_until: until, reason, guest_id: id, created_by: player.id }));
+        if (rows.length) await rest("POST", "ip_bans?on_conflict=ip", rows, "resolution=merge-duplicates,return=minimal");
+      }
+      forgetGuest(id);
+      ips.forEach(forgetIp);
+      const kicked = hooks.kickUser(id, 4003, "Guest play suspended") + hooks.kickGuestsFrom(ips, 4003, "Guest play suspended");
+      return { ok: true, until, ips: ips.length, kicked };
+    }
+
+    case "unbanGuest": {
+      stepUp(player);
+      const id = uuid(a.id);
+      const guest = await targetGuest(id);
+      const bans = await getRows(`ip_bans?guest_id=eq.${id}&select=ip`);
+      await audit(req, player.id, "unban_guest", id, { name: guest.name, ips: bans.map((b) => b.ip) });
+      await rest("PATCH", `guests?id=eq.${id}`, { banned_until: null, ban_reason: null });
+      await rest("DELETE", `ip_bans?guest_id=eq.${id}`);
+      forgetGuest(id);
+      bans.forEach((b) => forgetIp(String(b.ip)));
+      return { ok: true, ips: bans.length };
+    }
+
     case "revealEmail": {
       stepUp(player);
       const id = uuid(a.id);
@@ -400,12 +482,7 @@ async function runOp(req: IncomingMessage, s: AdminSession, player: Player, op: 
       if (id === player.id) throw new AdminError("not_allowed", "You can't ban yourself.");
       const reason = typeof a.reason === "string" ? a.reason.trim().slice(0, 200) : "";
       if (reason.length < 3) throw new AdminError("bad_args", "Give a reason (at least 3 characters).");
-      const permanent = a.minutes === null || a.hours === null;
-      const minutes = permanent
-        ? null
-        : a.minutes !== undefined
-          ? int(a.minutes, 5, 365 * 24 * 60, 60)
-          : int(a.hours, 1, 365 * 24, 24) * 60;
+      const minutes = banMinutes(a);
       const target = await targetProfile(id);
       if (target.role === "admin") throw new AdminError("not_allowed", "Remove the admin role before banning an admin.");
       const until = minutes === null ? "9999-12-31T00:00:00.000Z" : new Date(Date.now() + minutes * MIN).toISOString();

@@ -358,3 +358,57 @@
 .auth-link-notice.is-expired .auth-expiry {
   color: #f0b3a7;
 }
+
+.auth-guest {
+  text-align: left;
+}
+
+.auth-guest-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px dashed rgba(184, 145, 79, 0.55);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+}
+
+.auth-guest-btn svg {
+  color: var(--brass);
+}
+
+.auth-guest-btn:hover:not(:disabled) {
+  background: var(--brass-soft);
+  border-color: var(--brass);
+  transform: translateY(-1px);
+}
+
+.auth-guest-btn:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.auth-guest .auth-error {
+  margin: 10px 0 0;
+}
+
+.auth-guest-note {
+  margin: 10px 2px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.auth-guest-note strong {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}

@@ -102,7 +102,9 @@ export type Kind =
   | "game_refused"
   | "suppressed"
   | "blocked"
-  | "admin_denied";
+  | "admin_denied"
+  | "guest_created"
+  | "guest_refused";
 
 const PER_ADDRESS = Number(process.env.LOG_MAX_PER_MINUTE) || 120;
 const budget = new Map<string, { since: number; used: number; skipped: number; kinds: Record<string, number> }>();

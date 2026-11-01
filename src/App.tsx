@@ -87,7 +87,8 @@ function Gate() {
   if (auth.status === "loading") return <div className="auth-loading">Loading…</div>;
   if (auth.status === "recovery") return <AuthScreen recovery />;
   if (auth.status !== "signed_in" || !auth.account) return <AuthScreen />;
-  if (banned) return <Suspended until={banned.until} reason={banned.reason} />;
+  if (banned) return <Suspended until={banned.until} reason={banned.reason} guest={auth.account.guest === true} />;
+  if (ADMIN && auth.account.guest) return <AuthScreen />;
   if (ADMIN) {
     return (
       <Suspense fallback={<div className="auth-loading">Loading…</div>}>
