@@ -1,5 +1,6 @@
 import "./GameSetup.css";
 import { useEffect, useRef, useState } from "react";
+import { DEFAULT_ELO, ELO_PRESETS, ELO_STEP, MAX_ELO, MIN_ELO, clampElo, levelName } from "../bot/strength";
 import {
   categoryOf,
   controlLabel,
@@ -16,6 +17,7 @@ export type SetupChoice = {
   side: SideChoice;
   cards?: boolean;
   opponent?: "bot" | "friend";
+  elo?: number;
 };
 
 const hasHandicap = (c: SetupChoice) =>
@@ -86,6 +88,7 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
   const [side, setSide] = useState<SideChoice>(initial.side);
   const [cards, setCards] = useState(initial.cards ?? false);
   const [opponent, setOpponent] = useState<"bot" | "friend">(initial.opponent ?? "bot");
+  const [elo, setElo] = useState(clampElo(initial.elo ?? DEFAULT_ELO));
 
   const startRef = useRef<HTMLButtonElement>(null);
 
@@ -124,7 +127,7 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
   const isBulletGame = categoryOf(controlFor(base, "w")) === "Bullet";
   const online = opponent === "friend";
   const cardsBlocked = isBulletGame;
-  const choice: SetupChoice = { ...base, opponent, cards: cards && !cardsBlocked };
+  const choice: SetupChoice = { ...base, opponent, cards: cards && !cardsBlocked, elo };
   const sideText =
     side === "random" ? "random side" : side === "w" ? "you play White" : "you play Black";
   const category = categoryOf(controlFor(choice, "w"));
@@ -134,6 +137,7 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
     : `${yours} ${category}`;
   const subline =
     (hasHandicap(choice) ? `${category} · ${sideText}` : sideText) +
+    (online ? "" : ` · bot ${elo}`) +
     (choice.cards ? " · action cards" : "");
 
   return (
@@ -154,7 +158,7 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
             <p className="setup-lead">
               {online
                 ? "Pick a time control, then send the link to your friend."
-                : "Pick a time control and play the practice bot."}
+                : "Pick a time control and the bot's strength."}
             </p>
           </div>
           <button className="setup-close" onClick={onCancel} aria-label="Close the game panel" title="Close (Esc)">
@@ -265,7 +269,7 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
             <div className="side-seg" role="group" aria-label="Opponent">
               {(
                 [
-                  ["bot", "Practice bot"],
+                  ["bot", "Tempo Bot"],
                   ["friend", "A friend (link)"],
                 ] as ["bot" | "friend", string][]
               ).map(([value, text]) => (
@@ -281,6 +285,72 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
             </div>
           </div>
         </section>
+
+        {!online && (
+          <section className="setup-block bot-block" aria-label="Bot strength">
+            <div className="bot-head">
+              <span className="preset-cat">Bot rating</span>
+              <span className="bot-elo">
+                <strong>{elo}</strong>
+                <span>{levelName(elo)}</span>
+              </span>
+            </div>
+            <div className="bot-slider">
+              <button
+                type="button"
+                className="stepper-btn"
+                aria-label="Lower the bot's rating"
+                disabled={elo <= MIN_ELO}
+                onClick={() => setElo((e) => clampElo(e - ELO_STEP))}
+              >
+                −
+              </button>
+              <input
+                type="range"
+                min={MIN_ELO}
+                max={MAX_ELO}
+                step={ELO_STEP}
+                value={elo}
+                aria-label="Bot rating"
+                aria-valuetext={`${elo}, ${levelName(elo)}`}
+                style={{ ["--fill" as string]: `${((elo - MIN_ELO) / (MAX_ELO - MIN_ELO)) * 100}%` }}
+                onChange={(e) => setElo(clampElo(Number(e.target.value)))}
+              />
+              <button
+                type="button"
+                className="stepper-btn"
+                aria-label="Raise the bot's rating"
+                disabled={elo >= MAX_ELO}
+                onClick={() => setElo((e) => clampElo(e + ELO_STEP))}
+              >
+                +
+              </button>
+            </div>
+            <div className="preset-chips bot-presets">
+              {ELO_PRESETS.map((p) => (
+                <button
+                  key={p.elo}
+                  className={"chip-btn" + (elo === p.elo ? " is-on" : "")}
+                  aria-pressed={elo === p.elo}
+                  onClick={() => setElo(p.elo)}
+                >
+                  {p.name} <span className="bot-chip-elo">{p.elo}</span>
+                </button>
+              ))}
+            </div>
+            <p className="bot-credit">
+              Plays like a human of this rating, cards included. Powered by{" "}
+              <a href="https://github.com/official-stockfish/Stockfish" target="_blank" rel="noreferrer">
+                Stockfish
+              </a>{" "}
+              (GPL-3.0,{" "}
+              <a href="https://github.com/nmrugg/stockfish.js" target="_blank" rel="noreferrer">
+                source
+              </a>
+              ).
+            </p>
+          </section>
+        )}
 
         <section className="setup-block" aria-label="Play as">
           <div className="side-row">

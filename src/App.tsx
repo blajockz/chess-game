@@ -32,6 +32,8 @@ import AuthScreen from "./auth/AuthScreen";
 import { AuthProvider, useAuth, type Account } from "./auth/AuthProvider";
 import { usePresence } from "./net/usePresence";
 import Suspended from "./auth/Suspended";
+import { useBot } from "./bot/useBot";
+import { clampElo, DEFAULT_ELO, levelName } from "./bot/strength";
 
 const AdminApp = lazy(() => import("./admin/AdminApp"));
 const ADMIN = typeof location !== "undefined" && /^\/admin(\/|$)/.test(location.pathname);
@@ -47,7 +49,16 @@ import {
 
 const PRACTICE_OPPONENT = true;
 
-const DEFAULT_SETUP: SetupChoice = { initial: 300, increment: 0, side: "w" };
+function savedElo() {
+  try {
+    const raw = localStorage.getItem("tempo.botElo");
+    return raw ? clampElo(Number(raw)) : DEFAULT_ELO;
+  } catch {
+    return DEFAULT_ELO;
+  }
+}
+
+const DEFAULT_SETUP: SetupChoice = { initial: 300, increment: 0, side: "w", elo: savedElo() };
 
 const DRAW_REPLY_MS = 1200;
 
@@ -115,8 +126,10 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
   const [setupOpen, setSetupOpen] = useState(false);
   const [panel, setPanel] = useState<SidebarItem>("bot");
   const swallowClick = useRef(false);
+  const warmUp = useRef(() => {});
 
   function openPanel(kind: SidebarItem) {
+    if (kind === "bot") warmUp.current();
     if (setupOpen && panel === kind) {
       setSetupOpen(false);
       return;
@@ -148,7 +161,7 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
   const them: Side = you === "w" ? "b" : "w";
 
   const shield = useShieldFilter();
-  const game = useChessGame(soundOn, player, vsBot, frozen, shield.filter, (m) => {
+  const game = useChessGame(soundOn, player, frozen, shield.filter, (m) => {
     if (onlineRef.current) online.move(m.from, m.to, m.promotion, m.ply);
   });
 
@@ -218,6 +231,19 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
     shield.ref
   );
 
+  const botElo = clampElo(lastSetup.elo ?? DEFAULT_ELO);
+  warmUp.current = () => bot.warmUp();
+  const bot = useBot({
+    enabled: vsBot && !over && !setupOpen,
+    side: them,
+    elo: botElo,
+    game,
+    cards,
+    clocks,
+    control,
+    category: categoryOf(control),
+  });
+
   useEffect(() => {
     if (online.error?.code === "card_refused") {
       cards.say(online.error.message);
@@ -267,6 +293,12 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
     const side: Side =
       choice.side === "random" ? (Math.random() < 0.5 ? "w" : "b") : choice.side;
     setLastSetup(choice);
+    if (choice.elo !== undefined) {
+      try {
+        localStorage.setItem("tempo.botElo", String(clampElo(choice.elo)));
+      } catch {
+      }
+    }
     setControl(controlFor(choice, side));
     setYou(side);
     setJoining(null);
@@ -389,7 +421,8 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
       return;
     }
 
-    const botEdge = them === "w" ? game.materialForWhite : -game.materialForWhite;
+    const material = them === "w" ? game.materialForWhite : -game.materialForWhite;
+    const botEdge = bot.lastScore.current !== null ? (bot.lastScore.current <= -150 ? -1 : 1) : material;
     const offeredAt = game.ply;
     setDrawState("waiting");
 
@@ -442,7 +475,12 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
   const name = (s: Side) => (s === "w" ? "White" : "Black");
 
   function opponentDetail() {
-    if (!onlineMode) return `${name(them)} · ${PRACTICE_OPPONENT ? "Practice bot" : "Hotseat"}`;
+    if (!onlineMode) {
+      if (!PRACTICE_OPPONENT) return `${name(them)} · Hotseat`;
+      const state =
+        bot.status === "loading" ? " · Loading engine…" : bot.status === "unavailable" ? " · Engine unavailable" : "";
+      return `${name(them)} · ${levelName(botElo)}${state}`;
+    }
     if (!serverState || serverState.status === "waiting") return `${name(them)} · Waiting to join`;
     return `${name(them)} · ${serverState.online[them] ? "Online" : "Disconnected"}`;
   }
@@ -604,7 +642,7 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
       >
         <section className="board-column">
           <PlayerStrip
-            name={(onlineMode && serverState?.players?.[them]) || "Opponent"}
+            name={onlineMode ? serverState?.players?.[them] || "Opponent" : `Tempo Bot · ${botElo}`}
             admin={onlineMode && serverState?.admins?.[them] === true}
             badgeTip="down"
             detail={opponentDetail()}
@@ -691,7 +729,7 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
             idle={!started && !onlineMode}
             emptyText={
               !started && !onlineMode
-                ? `Move a piece to start a ${describeSetup(lastSetup)} game against the practice bot, or pick another game from the menu.`
+                ? `Move a piece to start a ${describeSetup(lastSetup)} game against Tempo Bot (${botElo}), or pick another game from the menu.`
                 : undefined
             }
             incomingDraw={incomingDraw}

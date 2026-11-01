@@ -28,8 +28,6 @@ type Clocks = ReturnType<typeof useClocks>;
 const other = (s: Side): Side => (s === "w" ? "b" : "w");
 const NAME = { w: "White", b: "Black" };
 
-const BOT_CARD_CHANCE = 0.45;
-
 export type { PlayedCard };
 
 type State = CardsState & { on: boolean };
@@ -272,6 +270,21 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
     setTargeting(null);
   }
 
+  function botPlay(card: CardId, picks: string[]) {
+    const { bot, remote } = o.current;
+    if (!bot || remote || whyNot(card, bot) !== null) return false;
+    const need = CARDS[card].targets;
+    if (picks.length !== need) return false;
+    for (let i = 0; i < need; i++) {
+      if (!targets(card, bot, picks.slice(0, i) as Square[]).includes(picks[i] as Square)) return false;
+    }
+    return resolve(card, bot, picks as Square[]);
+  }
+
+  function playableFor(side: Side) {
+    return sRef.current.hand.filter((c) => whyNot(c, side) === null);
+  }
+
   function deal(on: boolean) {
     setLocal(on ? { ...newCardsState(dealHand()), on: true } : OFF);
     setTargeting(null);
@@ -279,25 +292,6 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
     setReveal(null);
     setNote(null);
   }
-
-  useEffect(() => {
-    const { bot } = o.current;
-    if (!bot || !s.on || remote || game.turn !== bot || opts.over) return;
-    const id = window.setTimeout(() => {
-      const cur = sRef.current;
-      const playable = cur.hand.filter((c) => whyNot(c, bot) === null);
-      if (!playable.length || Math.random() > BOT_CARD_CHANCE) return;
-      const card = playable[Math.floor(Math.random() * playable.length)];
-      const picks: Square[] = [];
-      for (let i = 0; i < CARDS[card].targets; i++) {
-        const options = targetsFor(card, o.current.game.chess.fen(), bot, picks);
-        if (!options.length) return;
-        picks.push(options[Math.floor(Math.random() * options.length)] as Square);
-      }
-      resolve(card, bot, picks);
-    }, 250);
-    return () => window.clearTimeout(id);
-  }, [game.ply, game.gameId, s.on, opts.over]);
 
   useEffect(() => {
     if (!reveal) return;
@@ -335,6 +329,9 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
     note,
     say: setNote,
     whyNot,
+    botPlay,
+    playableFor,
+    state: s as CardsState,
     start,
     pick,
     cancel,

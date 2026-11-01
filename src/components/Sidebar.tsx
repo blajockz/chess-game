@@ -35,7 +35,7 @@ function Icon({ kind }: { kind: SidebarItem }) {
 }
 
 const ITEMS: { id: SidebarItem; label: string; hint: string }[] = [
-  { id: "bot", label: "New game", hint: "Choose a time control and play the practice bot" },
+  { id: "bot", label: "New game", hint: "Choose a time control and play Tempo Bot" },
   { id: "friend", label: "Play a friend", hint: "Create a link and play a friend online" },
 ];
 

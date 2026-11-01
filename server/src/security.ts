@@ -145,7 +145,8 @@ export function securityHeaders(req: IncomingMessage): Record<string, string> {
   const extra = EXTRA_ORIGINS.map((o) => " " + o.replace(/^http/, "ws")).join("");
   const csp = [
     "default-src 'self'",
-    "script-src 'self'",
+    "script-src 'self' 'wasm-unsafe-eval'",
+    "worker-src 'self'",
     "style-src 'self' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data:",
