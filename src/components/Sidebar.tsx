@@ -6,7 +6,7 @@ export type SidebarItem = "bot" | "friend";
 type Props = {
   open: SidebarItem | null;
   onOpen: (item: SidebarItem) => void;
-  account?: { name: string; role: "user" | "admin" } | null;
+  account?: { name: string; role: "user" | "admin"; guest?: boolean } | null;
   onSignOut?: () => void;
 };
 
@@ -62,10 +62,20 @@ export default function Sidebar({ open, onOpen, account, onSignOut }: Props) {
         </a>
       )}
       {account && onSignOut && (
-        <div className={"account" + (account.role === "admin" ? " is-admin" : "")} title={account.name}>
+        <div
+          className={"account" + (account.role === "admin" ? " is-admin" : "") + (account.guest ? " is-guest" : "")}
+          title={account.guest ? `${account.name}: playing as a guest (no rating)` : account.name}
+        >
           <span className="account-avatar">
             <span className="account-badge" aria-hidden="true">
-              {[...account.name][0]?.toUpperCase() ?? "?"}
+              {account.guest ? (
+                <svg viewBox="0 0 24 24" width="17" height="17">
+                  <circle cx="12" cy="8.5" r="3.4" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                  <path d="M5.5 19.5c.8-3.3 3.3-5 6.5-5s5.7 1.7 6.5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+              ) : (
+                ([...account.name][0]?.toUpperCase() ?? "?")
+              )}
             </span>
             {account.role === "admin" && (
               <span className="account-crest">
@@ -74,8 +84,13 @@ export default function Sidebar({ open, onOpen, account, onSignOut }: Props) {
             )}
           </span>
           <span className="account-name">{account.name}</span>
-          <button className="account-out" onClick={onSignOut}>
-            Sign out
+          {account.guest && <span className="account-tag">Guest</span>}
+          <button
+            className="account-out"
+            onClick={onSignOut}
+            title={account.guest ? "Sign in or create an account (you leave this guest)" : undefined}
+          >
+            {account.guest ? "Sign in" : "Sign out"}
           </button>
         </div>
       )}

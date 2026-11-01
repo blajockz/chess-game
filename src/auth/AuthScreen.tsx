@@ -2,6 +2,7 @@ import "./AuthScreen.css";
 import { useEffect, useState, type FormEvent } from "react";
 import { LINK_MINUTES, RESEND_WAIT_S, friendlyError, linkLifetime, returnUrl, supabase, takeLinkFailure } from "./supabase";
 import { useAuth } from "./AuthProvider";
+import { GuestProblem } from "./guest.ts";
 
 type Mode = "signin" | "signup" | "forgot" | "reset";
 
@@ -96,6 +97,56 @@ function LinkNotice({ sent, onResend, busy }: { sent: Sent; onResend: () => void
       <button type="button" className="auth-link auth-resend" onClick={onResend} disabled={busy || wait > 0}>
         {wait > 0 ? `Send a new link in ${left(wait)}` : busy ? "Sending…" : "Send a new link"}
       </button>
+    </div>
+  );
+}
+
+function GuestEntry({ withDivider }: { withDivider: boolean }) {
+  const { playAsGuest } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function start() {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await playAsGuest();
+    } catch (err) {
+      const p = err instanceof GuestProblem ? err : null;
+      let text = p?.message ?? "Couldn't start a guest game. Try again.";
+      if (p?.code === "ip_banned" && p.until) {
+        const end = new Date(p.until);
+        text = text.replace(/\.$/, "") + (end.getFullYear() >= 9999 ? " permanently" : ` until ${end.toLocaleString()}`);
+        text += ". You can still sign in with an account.";
+        if (p.reason) text += ` Reason: ${p.reason}`;
+      }
+      setError(text);
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="auth-guest">
+      {withDivider && (
+        <p className="auth-or">
+          <span>or</span>
+        </p>
+      )}
+      <button type="button" className="auth-guest-btn" onClick={() => void start()} disabled={busy}>
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <circle cx="12" cy="8" r="3.6" fill="none" stroke="currentColor" strokeWidth="1.7" />
+          <path d="M4.8 20c.9-3.7 3.7-5.6 7.2-5.6s6.3 1.9 7.2 5.6" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        </svg>
+        {busy ? "Getting your guest name…" : "Play as guest"}
+      </button>
+      {error && (
+        <p className="auth-error" role="alert">
+          {error}
+        </p>
+      )}
+      <p className="auth-guest-note">
+        No account needed. You get a random name like <strong>guest2654840</strong> and no rating. To prevent abuse, guest games are
+        linked to your IP address.
+      </p>
     </div>
   );
 }
@@ -233,6 +284,7 @@ export default function AuthScreen({ recovery = false }: { recovery?: boolean })
             VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY are missing. Add them to the .env file (and to Render),
             then build again.
           </p>
+          <GuestEntry withDivider />
         </div>
       </main>
     );
@@ -348,6 +400,7 @@ export default function AuthScreen({ recovery = false }: { recovery?: boolean })
             ← Back to sign in
           </button>
         )}
+        {(mode === "signin" || mode === "signup") && !sent && <GuestEntry withDivider />}
         {(mode === "signin" || mode === "signup") && (
           <p className="auth-small">Signing in keeps games fair and protects them from spam and cheating.</p>
         )}

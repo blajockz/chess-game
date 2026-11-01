@@ -23,9 +23,21 @@ import { clientIp, ipHeaders, originAllowed, readMessage, securityHeaders } from
 import { ProofOfWork, type Challenge } from "./challenges.js";
 import { sendBanPage, sendBlockPage, wantsPage } from "./banpage.js";
 import { blockReason, ipFilterStatus } from "./ipfilter.js";
-import { AUTH_DISABLED, WS_PROTOCOL, bearer, verifyToken, wsToken, type Player } from "./auth.js";
+import { AUTH_DISABLED, WS_PROTOCOL, bearer, verifyToken, wsGuestToken, wsToken, type Player } from "./auth.js";
 import { LOGS_ON, banEnd, logEvent, logPresence, origin, profileOf, touch } from "./logs.js";
 import { handleAdmin, setAdminHooks } from "./admin.js";
+import {
+  GuestError,
+  createGuest,
+  guestBan,
+  guestChallenge,
+  guestRecord,
+  guestPlayer,
+  isGuestToken,
+  seenGuest,
+  sweepGuests,
+  verifyGuestToken,
+} from "./guests.js";
 
 const PORT = Number(process.env.PORT) || DEFAULT_PORT;
 const ROOM_IDLE_MS = 10 * 60 * 1000;
@@ -374,11 +386,75 @@ function json(req: IncomingMessage, res: import("node:http").ServerResponse, sta
   res.end(JSON.stringify(body));
 }
 
+async function guestKnown(id: string) {
+  return (await guestRecord(id, 5000)).found;
+}
+
+async function readSmallJson(req: IncomingMessage, limit = 1024): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > limit) throw new GuestError("bad_request", "Request too large.", 413);
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    const v = JSON.parse(Buffer.concat(chunks).toString("utf8") || "null");
+    if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
+  } catch {
+  }
+  throw new GuestError("bad_request", "Couldn't read the request.", 400);
+}
+
+async function guestApi(req: IncomingMessage, res: import("node:http").ServerResponse) {
+  const ip = clientIp(req);
+  try {
+    if (req.method === "GET") return json(req, res, 200, guestChallenge(ip));
+    if (req.method !== "POST") return json(req, res, 405, { error: "method_not_allowed" });
+    if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) {
+      return json(req, res, 415, { error: "bad_request", message: "Send JSON." });
+    }
+    const body = await readSmallJson(req);
+    const guest = await createGuest(req, ip, body.id, body.nonce);
+    apiUser.set(req, guest.id);
+    json(req, res, 201, guest);
+  } catch (err) {
+    if (err instanceof GuestError) {
+      const headers = typeof err.extra.retryAfter === "number" ? { "retry-after": String(err.extra.retryAfter) } : {};
+      res.writeHead(err.status, { ...securityHeaders(req), "content-type": "application/json", "cache-control": "no-store", ...headers });
+      res.end(JSON.stringify({ error: err.code, message: err.message, ...err.extra }));
+      return;
+    }
+    console.error(err);
+    if (!res.headersSent) json(req, res, 500, { error: "server_error" });
+  }
+}
+
 async function api(req: IncomingMessage, res: import("node:http").ServerResponse, path: string) {
   try {
+    if (path === "/api/guest") return await guestApi(req, res);
     if (path !== "/api/me") return json(req, res, 404, { error: "not_found" });
     if (req.method !== "GET") return json(req, res, 405, { error: "method_not_allowed" });
-    const player = await verifyToken(bearer(req));
+    const sent = bearer(req);
+    if (isGuestToken(sent)) {
+      const pass = verifyGuestToken(sent);
+      if (!pass) return json(req, res, 401, { error: "unauthorized" });
+      const ip = clientIp(req);
+      const [ban, known] = await Promise.all([guestBan(pass.id, ip, 5000), guestKnown(pass.id)]);
+      if (!known) return json(req, res, 401, { error: "unauthorized" });
+      apiUser.set(req, pass.id);
+      seenGuest(pass.id, ip, req);
+      return json(req, res, 200, {
+        id: pass.id,
+        email: null,
+        name: pass.name,
+        role: "user",
+        guest: true,
+        expiresAt: new Date(pass.exp * 1000).toISOString(),
+        banned: ban ? { until: new Date(ban.until).toISOString(), reason: ban.reason } : null,
+      });
+    }
+    const player = await verifyToken(sent);
     if (!player) return json(req, res, 401, { error: "unauthorized" });
     apiUser.set(req, player.id);
     const profile = await profileOf(player.id);
@@ -438,9 +514,19 @@ http.on("upgrade", async (req, socket, head) => {
     return refuse(socket, 400, "Bad Request", req, "missing protocol");
   }
 
-  const player = AUTH_DISABLED ? null : await verifyToken(wsToken(req));
+  const guestToken = wsGuestToken(req);
+  let player: Player | null = null;
   let bannedUntil: number | null = null;
-  if (player) {
+  if (guestToken) {
+    const pass = verifyGuestToken(guestToken);
+    if (pass && (await guestRecord(pass.id)).found) {
+      player = guestPlayer(pass);
+      bannedUntil = (await guestBan(pass.id, ip))?.until ?? null;
+    }
+  } else if (!AUTH_DISABLED) {
+    player = await verifyToken(wsToken(req));
+  }
+  if (player && !player.guest) {
     const profile = await profileOf(player.id);
     if (profile.name) player.name = profile.name;
     player.admin = profile.role === "admin";
@@ -449,14 +535,14 @@ http.on("upgrade", async (req, socket, head) => {
   if (socket.destroyed) return;
   players.set(req, player);
   wss.handleUpgrade(req, socket, head, (ws) => {
-    if (!AUTH_DISABLED && !player) {
+    if (!player && (!AUTH_DISABLED || guestToken)) {
       logEvent("auth_failed", req, { detail: { where: path } });
       ws.close(CLOSE_UNAUTHORIZED, "Sign in again");
       return;
     }
     if (bannedUntil) {
-      logEvent("refused", req, { userId: player?.id, detail: { why: "account banned", where: path } });
-      ws.close(CLOSE_BANNED, "Account suspended");
+      logEvent("refused", req, { userId: player?.id, detail: { why: player?.guest ? "guest banned" : "account banned", where: path } });
+      ws.close(CLOSE_BANNED, player?.guest ? "Guest play suspended" : "Account suspended");
       return;
     }
     if (path === "/presence") presenceConnection(ws, req, player);
@@ -482,7 +568,18 @@ function opened(ws: WebSocket, ip: string) {
   return true;
 }
 
-const present = new Map<WebSocket, { userId: string | null; name: string | null; ip: string; country: string | null; userAgent: string | null; since: number }>();
+const presentReq = new WeakMap<WebSocket, IncomingMessage>();
+
+function seen(player: Player | null, req: IncomingMessage) {
+  if (!player) return;
+  if (player.guest) seenGuest(player.id, clientIp(req), req);
+  else touch(player.id);
+}
+
+const present = new Map<
+  WebSocket,
+  { userId: string | null; name: string | null; guest: boolean; ip: string; country: string | null; userAgent: string | null; since: number }
+>();
 
 setAdminHooks({
   online: () => {
@@ -503,6 +600,13 @@ setAdminHooks({
     for (const [ws, c] of conns) if (c.player?.id === userId) (ws.close(code, reason), n++);
     return n;
   },
+  kickGuestsFrom: (ips, code, reason) => {
+    const set = new Set(ips);
+    let n = 0;
+    for (const [ws, p] of present) if (p.guest && set.has(clientIp(presentReq.get(ws)!))) (ws.close(code, reason), n++);
+    for (const [ws, c] of conns) if (c.player?.guest && set.has(c.ip)) (ws.close(code, reason), n++);
+    return n;
+  },
 });
 
 function presenceConnection(ws: WebSocket, req: IncomingMessage, player: Player | null) {
@@ -511,17 +615,26 @@ function presenceConnection(ws: WebSocket, req: IncomingMessage, player: Player 
   const sessionId = randomUUID();
   const started = Date.now();
   const o = origin(req);
-  present.set(ws, { userId: player?.id ?? null, name: player?.name ?? null, ip: o.ip, country: o.country, userAgent: o.user_agent, since: started });
+  present.set(ws, {
+    userId: player?.id ?? null,
+    name: player?.name ?? null,
+    guest: player?.guest === true,
+    ip: o.ip,
+    country: o.country,
+    userAgent: o.user_agent,
+    since: started,
+  });
+  presentReq.set(ws, req);
   ws.once("close", () => present.delete(ws));
   logPresence({ event: "enter", sessionId, userId: player?.id ?? null, req });
-  if (player) touch(player.id);
+  seen(player, req);
   ws.on("message", () => {
     logEvent("bad_message", req, { userId: player?.id, detail: { where: "presence" } });
     ws.close(1008, "Unexpected message");
   });
   ws.on("close", (code) => {
     logPresence({ event: "leave", sessionId, userId: player?.id ?? null, req, durationMs: Date.now() - started, reason: String(code) });
-    if (player) touch(player.id);
+    seen(player, req);
   });
 }
 
@@ -542,7 +655,7 @@ wss.on("connection", (ws: WebSocket, req) => {
     openedAt: Date.now(),
   };
   logEvent("game_connect", req, { userId: conn.player?.id });
-  if (conn.player) touch(conn.player.id);
+  seen(conn.player, req);
   conns.set(ws, conn);
   newChallenge(ws, conn);
 
@@ -657,6 +770,7 @@ setInterval(
     requestWindow.sweep();
     messageWindow.sweep();
     pow.sweep();
+    sweepGuests();
   }),
   60 * 1000
 ).unref();
