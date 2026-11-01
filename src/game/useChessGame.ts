@@ -9,6 +9,8 @@ export type Pending = { from: Square; to: Square; color: "w" | "b" };
 
 export type Premove = { from: Square; to: Square };
 
+const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
 const START_COUNT: Record<string, number> = { p: 8, n: 2, b: 2, r: 2, q: 1 };
 const VALUE: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9 };
 const ORDER = ["q", "r", "b", "n", "p"];
@@ -16,7 +18,6 @@ const ORDER = ["q", "r", "b", "n", "p"];
 export function useChessGame(
   soundOn: boolean,
   playerColor: "w" | "b" | null = null,
-  autoOpponent = false,
   frozen?: { current: boolean },
   moveFilter?: (move: Move) => boolean,
   onLocalMove?: (move: { from: string; to: string; promotion?: string; ply: number }) => void
@@ -187,6 +188,28 @@ export function useChessGame(
     setSelected(null);
   }
 
+  function botMove(uci: string) {
+    const g = gameRef.current;
+    const legal = allowed().some((m) => m.from + m.to + (m.promotion ?? "") === uci);
+    if (!legal || g.isGameOver()) return false;
+    commit(uci.slice(0, 2) as Square, uci.slice(2, 4) as Square, (uci[4] as PromotionPiece | undefined), false);
+    return true;
+  }
+
+  function enginePosition() {
+    const events = applied.current;
+    let fen = START_FEN;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.t === "card") {
+        fen = e.fen;
+        break;
+      }
+    }
+    const moves = gameRef.current.history({ verbose: true }).map((m) => m.from + m.to + (m.promotion ?? ""));
+    return { fen, moves };
+  }
+
   function applyRemote(from: string, to: string, promotion?: string) {
     commit(from as Square, to as Square, promotion as PromotionPiece | undefined, false);
   }
@@ -270,26 +293,6 @@ export function useChessGame(
   const verbose = [...earlier.current, ...game.history({ verbose: true })];
   const ply = verbose.length;
   const turnKey = `${gameId}:${playerColor}:${game.turn()}:${ply}`;
-
-  useEffect(() => {
-    if (!autoOpponent || playerColor === null) return;
-    if (myTurn || pending || game.isGameOver() || frozen?.current) return;
-
-    const id = setTimeout(() => {
-      if (frozen?.current || gameRef.current.isGameOver()) return;
-      const options = allowed();
-      if (!options.length) return;
-      const pick = options[Math.floor(Math.random() * options.length)];
-      commit(
-        pick.from as Square,
-        pick.to as Square,
-        pick.promotion as PromotionPiece | undefined,
-        false
-      );
-    }, 700);
-
-    return () => clearTimeout(id);
-  }, [turnKey, autoOpponent, pending]);
 
   useEffect(() => {
     if (!myTurn) return;
@@ -420,6 +423,9 @@ export function useChessGame(
     reset,
     edit,
     clearSelection,
+    botMove,
+    enginePosition,
+    legalMoves: () => allowed().map((m) => m.from + m.to + (m.promotion ?? "")),
     applyRemote,
     syncTo,
     follow,

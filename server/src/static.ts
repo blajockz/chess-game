@@ -20,6 +20,7 @@ const TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
   ".mp3": "audio/mpeg",
   ".txt": "text/plain; charset=utf-8",
+  ".wasm": "application/wasm",
 };
 
 export function hasBuild() {
@@ -75,7 +76,8 @@ export function serveStatic(req: IncomingMessage, res: ServerResponse) {
     return;
   }
 
-  const hashed = target.startsWith(join(STATIC_DIR, "assets") + sep);
+  const hashed =
+    target.startsWith(join(STATIC_DIR, "assets") + sep) || target.startsWith(join(STATIC_DIR, "engine") + sep);
   const stream = createReadStream(target);
   stream.on("error", () => {
     if (!res.headersSent) plain(req, res, 500, "Server error");
