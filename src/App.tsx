@@ -37,6 +37,8 @@ import { clampElo, DEFAULT_ELO, levelName } from "./bot/strength";
 
 const AdminApp = lazy(() => import("./admin/AdminApp"));
 const ADMIN = typeof location !== "undefined" && /^\/admin(\/|$)/.test(location.pathname);
+const PuzzlesPage = lazy(() => import("./puzzles/PuzzlesPage"));
+const PUZZLES = typeof location !== "undefined" && /^\/puzzles(\/|$)/.test(location.pathname);
 import ConnectionOverlay from "./components/ConnectionOverlay";
 import { inviteLink, linkFromUrl, useOnline } from "./net/useOnline";
 import {
@@ -80,14 +82,66 @@ export default function App() {
   );
 }
 
+function addressWithoutKey() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("k");
+  return url.toString();
+}
+
+function useGuestNavigation(isGuest: boolean) {
+  const [view, setView] = useState<"game" | "auth">("game");
+  const gameUrl = useRef("");
+  useEffect(() => {
+    if (!isGuest) {
+      setView("game");
+      return;
+    }
+    gameUrl.current = addressWithoutKey();
+    const onAddress = () => {
+      if (window.history.state?.tempo !== "auth") gameUrl.current = addressWithoutKey();
+    };
+    if (window.history.state?.tempo !== "game") {
+      window.history.replaceState({ ...(window.history.state ?? {}), tempo: "auth" }, "");
+      window.history.pushState({ tempo: "game" }, "");
+    }
+    const onPop = (e: PopStateEvent) => {
+      if (e.state?.tempo === "auth") {
+        window.history.replaceState(e.state, "", addressWithoutKey());
+        setView("auth");
+      } else {
+        gameUrl.current = addressWithoutKey();
+        setView("game");
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    window.addEventListener("tempo:address", onAddress);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      window.removeEventListener("tempo:address", onAddress);
+    };
+  }, [isGuest]);
+  return {
+    view,
+    toAuth: () => {
+      if (window.history.state?.tempo === "game") window.history.back();
+      else setView("auth");
+    },
+    toGame: () => {
+      window.history.pushState({ tempo: "game" }, "", gameUrl.current || addressWithoutKey());
+      setView("game");
+    },
+  };
+}
+
 function Gate() {
   const auth = useAuth();
   const banned = auth.account?.banned ?? null;
+  const guestNav = useGuestNavigation(auth.status === "signed_in" && auth.account?.guest === true && !banned && !ADMIN);
   usePresence(auth.status === "signed_in" && !banned ? (auth.account?.id ?? null) : null);
   if (auth.status === "loading") return <div className="auth-loading">Loading…</div>;
   if (auth.status === "recovery") return <AuthScreen recovery />;
   if (auth.status !== "signed_in" || !auth.account) return <AuthScreen />;
-  if (banned) return <Suspended until={banned.until} reason={banned.reason} guest={auth.account.guest === true} />;
+  if (banned) return <Suspended ban={banned} guest={auth.account.guest === true} />;
   if (ADMIN && auth.account.guest) return <AuthScreen />;
   if (ADMIN) {
     return (
@@ -96,7 +150,22 @@ function Gate() {
       </Suspense>
     );
   }
-  return <Game account={auth.account} onSignOut={() => void auth.signOut()} />;
+  if (auth.account.guest && (guestNav.view === "auth" || auth.prompt)) {
+    const toGame = () => {
+      auth.clearPrompt();
+      guestNav.toGame();
+    };
+    return <AuthScreen guest={{ name: auth.account.name, onContinue: toGame }} />;
+  }
+  const onSignOut = auth.account.guest ? guestNav.toAuth : () => void auth.signOut();
+  if (PUZZLES) {
+    return (
+      <Suspense fallback={<div className="auth-loading">Loading…</div>}>
+        <PuzzlesPage account={auth.account} onSignOut={onSignOut} />
+      </Suspense>
+    );
+  }
+  return <Game account={auth.account} onSignOut={onSignOut} />;
 }
 
 function Game({ account, onSignOut }: { account: Account; onSignOut: () => void }) {

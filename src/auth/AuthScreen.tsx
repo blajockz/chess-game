@@ -1,8 +1,8 @@
 import "./AuthScreen.css";
 import { useEffect, useState, type FormEvent } from "react";
-import { LINK_MINUTES, RESEND_WAIT_S, friendlyError, linkLifetime, returnUrl, supabase, takeLinkFailure } from "./supabase";
-import { useAuth } from "./AuthProvider";
-import { GuestProblem } from "./guest.ts";
+import { LINK_MINUTES, RESEND_WAIT_S, confirmUrl, friendlyError, linkLifetime, returnUrl, supabase } from "./supabase";
+import { guestProblemText, useAuth } from "./AuthProvider";
+import { GuestProblem } from "./guest";
 
 type Mode = "signin" | "signup" | "forgot" | "reset";
 
@@ -101,10 +101,12 @@ function LinkNotice({ sent, onResend, busy }: { sent: Sent; onResend: () => void
   );
 }
 
-function GuestEntry({ withDivider }: { withDivider: boolean }) {
-  const { playAsGuest } = useAuth();
+export type CurrentGuest = { name: string; onContinue: () => void };
+
+function GuestEntry({ withDivider, current }: { withDivider: boolean; current?: CurrentGuest }) {
+  const { playAsGuest, guestError } = useAuth();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(guestError);
   async function start() {
     if (busy) return;
     setBusy(true);
@@ -112,17 +114,31 @@ function GuestEntry({ withDivider }: { withDivider: boolean }) {
     try {
       await playAsGuest();
     } catch (err) {
-      const p = err instanceof GuestProblem ? err : null;
-      let text = p?.message ?? "Couldn't start a guest game. Try again.";
-      if (p?.code === "ip_banned" && p.until) {
-        const end = new Date(p.until);
-        text = text.replace(/\.$/, "") + (end.getFullYear() >= 9999 ? " permanently" : ` until ${end.toLocaleString()}`);
-        text += ". You can still sign in with an account.";
-        if (p.reason) text += ` Reason: ${p.reason}`;
-      }
-      setError(text);
+      setError(err instanceof GuestProblem ? guestProblemText(err) : "Couldn't start a guest game. Try again.");
       setBusy(false);
     }
+  }
+  if (current) {
+    return (
+      <div className="auth-guest">
+        {withDivider && (
+          <p className="auth-or">
+            <span>or</span>
+          </p>
+        )}
+        <button type="button" className="auth-guest-btn" onClick={current.onContinue}>
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span>
+            Continue as <span className="auth-guest-name">{current.name}</span>
+          </span>
+        </button>
+        <p className="auth-guest-note">
+          Signing in or creating an account here replaces this guest.
+        </p>
+      </div>
+    );
   }
   return (
     <div className="auth-guest">
@@ -151,8 +167,8 @@ function GuestEntry({ withDivider }: { withDivider: boolean }) {
   );
 }
 
-export default function AuthScreen({ recovery = false }: { recovery?: boolean }) {
-  const { finishRecovery } = useAuth();
+export default function AuthScreen({ recovery = false, guest }: { recovery?: boolean; guest?: CurrentGuest }) {
+  const { finishRecovery, prompt, askSignIn, holdSessions } = useAuth();
   const [mode, setMode] = useState<Mode>(recovery ? "reset" : "signin");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -161,15 +177,22 @@ export default function AuthScreen({ recovery = false }: { recovery?: boolean })
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sent, setSent] = useState<Sent | null>(null);
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
-    const problem = takeLinkFailure();
-    if (problem) setError(problem);
-  }, []);
+    if (!prompt || recovery) return;
+    setMode("signin");
+    setSent(null);
+    setPassword("");
+    if (prompt.email) setEmail(prompt.email);
+    setError(prompt.tone === "error" ? prompt.text : "");
+    setNotice(prompt.tone === "notice" ? prompt.text : "");
+  }, [prompt, recovery]);
 
   function go(next: Mode) {
     setMode(next);
     setError("");
+    setNotice("");
     setSent(null);
     setPassword("");
   }
@@ -181,7 +204,7 @@ export default function AuthScreen({ recovery = false }: { recovery?: boolean })
     try {
       const { error: err } =
         sent.kind === "signup"
-          ? await supabase.auth.resend({ type: "signup", email: sent.email, options: { emailRedirectTo: returnUrl() } })
+          ? await supabase.auth.resend({ type: "signup", email: sent.email, options: { emailRedirectTo: confirmUrl() } })
           : await supabase.auth.resetPasswordForEmail(sent.email, { redirectTo: returnUrl() });
       if (err) setError(friendlyError(err));
       else setSent({ ...sent, at: Date.now(), again: true });
@@ -210,6 +233,7 @@ export default function AuthScreen({ recovery = false }: { recovery?: boolean })
     e.preventDefault();
     if (!supabase || busy) return;
     setError("");
+    setNotice("");
     setSent(null);
 
     const mail = email.trim().toLowerCase();
@@ -232,11 +256,19 @@ export default function AuthScreen({ recovery = false }: { recovery?: boolean })
         const { error: err } = await supabase.auth.signInWithPassword({ email: mail, password });
         if (err) setError(friendlyError(err));
       } else if (mode === "signup") {
-        const { data, error: err } = await supabase.auth.signUp({
-          email: mail,
-          password,
-          options: { data: { display_name: name.trim().replace(/\s+/g, " ") }, emailRedirectTo: returnUrl() },
-        });
+        holdSessions(true);
+        let signUpResult;
+        try {
+          signUpResult = await supabase.auth.signUp({
+            email: mail,
+            password,
+            options: { data: { display_name: name.trim().replace(/\s+/g, " ") }, emailRedirectTo: confirmUrl() },
+          });
+          if (signUpResult.data.session) await supabase.auth.signOut({ scope: "local" });
+        } finally {
+          holdSessions(false);
+        }
+        const { data, error: err } = signUpResult;
         if (err) setError(friendlyError(err));
         else if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
           setError("An account already uses this email. Sign in instead, or use “Forgot it?” to reset the password.");
@@ -245,6 +277,7 @@ export default function AuthScreen({ recovery = false }: { recovery?: boolean })
           setSent({ kind: "signup", email: mail, at: Date.now(), again: false });
           setPassword("");
         }
+        else askSignIn({ tone: "notice", text: "Your account is ready. Sign in to start playing.", email: mail });
       } else if (mode === "forgot") {
         const { error: err } = await supabase.auth.resetPasswordForEmail(mail, { redirectTo: returnUrl() });
         if (err) setError(friendlyError(err));
@@ -284,7 +317,7 @@ export default function AuthScreen({ recovery = false }: { recovery?: boolean })
             VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY are missing. Add them to the .env file (and to Render),
             then build again.
           </p>
-          <GuestEntry withDivider />
+          <GuestEntry withDivider current={guest} />
         </div>
       </main>
     );
@@ -383,6 +416,11 @@ export default function AuthScreen({ recovery = false }: { recovery?: boolean })
             </label>
           )}
 
+          {notice && (
+            <p className="auth-notice" role="status">
+              {notice}
+            </p>
+          )}
           {error && (
             <p className="auth-error" role="alert">
               {error}
@@ -400,7 +438,7 @@ export default function AuthScreen({ recovery = false }: { recovery?: boolean })
             ← Back to sign in
           </button>
         )}
-        {(mode === "signin" || mode === "signup") && !sent && <GuestEntry withDivider />}
+        {(mode === "signin" || mode === "signup") && (!sent || guest) && <GuestEntry withDivider current={guest} />}
         {(mode === "signin" || mode === "signup") && (
           <p className="auth-small">Signing in keeps games fair and protects them from spam and cheating.</p>
         )}

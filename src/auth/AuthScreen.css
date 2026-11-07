@@ -412,3 +412,81 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
+
+.auth-guest-name {
+  font-variant-numeric: tabular-nums;
+  color: var(--brass);
+}
+
+.auth-banned .auth-title {
+  margin-top: 4px;
+}
+
+.auth-ban-icon {
+  width: 58px;
+  height: 58px;
+  margin: 0 auto 6px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #f3b4a6;
+  background: rgba(201, 69, 47, 0.14);
+  border: 1px solid rgba(201, 69, 47, 0.45);
+}
+
+.auth-ban-facts {
+  margin: 18px 0 20px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  text-align: left;
+}
+
+.auth-ban-facts > div {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+  min-width: 0;
+}
+
+.auth-ban-facts dt {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.auth-ban-facts dd {
+  margin: 4px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.auth-ban-facts dd.is-forever {
+  color: #f3b4a6;
+}
+
+.auth-ban-facts > .auth-ban-reason {
+  grid-column: 1 / -1;
+  border-color: rgba(201, 69, 47, 0.4);
+  background: rgba(201, 69, 47, 0.08);
+}
+
+.auth-ban-reason dd {
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+@media (max-width: 420px) {
+  .auth-ban-facts {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.auth-ban-facts.is-forever {
+  grid-template-columns: 1fr;
+}

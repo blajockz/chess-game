@@ -26,6 +26,7 @@ import { blockReason, ipFilterStatus } from "./ipfilter.js";
 import { AUTH_DISABLED, WS_PROTOCOL, bearer, verifyToken, wsGuestToken, wsToken, type Player } from "./auth.js";
 import { LOGS_ON, banEnd, logEvent, logPresence, origin, profileOf, touch } from "./logs.js";
 import { handleAdmin, setAdminHooks } from "./admin.js";
+import { handlePuzzles } from "./puzzles.js";
 import {
   GuestError,
   createGuest,
@@ -349,6 +350,10 @@ const http = createServer(
       void handleAdmin(req, res, path);
       return;
     }
+    if (path.startsWith("/api/puzzles/")) {
+      void handlePuzzles(req, res, path, (userId) => apiUser.set(req, userId));
+      return;
+    }
     if (path.startsWith("/api/")) {
       void api(req, res, path);
       return;
@@ -373,6 +378,7 @@ function logRequest(req: IncomingMessage, status: number) {
   const userId = apiUser.get(req) ?? null;
   const query = status >= 400 && url.includes("?") ? { query: url.slice(url.indexOf("?") + 1, url.indexOf("?") + 301) } : undefined;
   if (status === 429) return logEvent("rate_limited", req, { status });
+  if (path === "/api/puzzles/move" && status < 400) return;
   if (path.startsWith("/api/")) return logEvent(status === 401 ? "auth_failed" : "api", req, { status, userId, detail: query });
   if (status === 404) return logEvent("not_found", req, { status, detail: query });
   if (status >= 400) return logEvent("error", req, { status, detail: query });
@@ -451,7 +457,9 @@ async function api(req: IncomingMessage, res: import("node:http").ServerResponse
         role: "user",
         guest: true,
         expiresAt: new Date(pass.exp * 1000).toISOString(),
-        banned: ban ? { until: new Date(ban.until).toISOString(), reason: ban.reason } : null,
+        banned: ban
+          ? { until: new Date(ban.until).toISOString(), reason: ban.reason, since: ban.since ? new Date(ban.since).toISOString() : null }
+          : null,
       });
     }
     const player = await verifyToken(sent);
@@ -464,7 +472,9 @@ async function api(req: IncomingMessage, res: import("node:http").ServerResponse
       email: player.email,
       name: profile.name ?? player.name,
       role: profile.role,
-      banned: until ? { until: new Date(until).toISOString(), reason: profile.banReason } : null,
+      banned: until
+        ? { until: new Date(until).toISOString(), reason: profile.banReason, since: profile.bannedAt ? new Date(profile.bannedAt).toISOString() : null }
+        : null,
     });
   } catch (err) {
     console.error(err);

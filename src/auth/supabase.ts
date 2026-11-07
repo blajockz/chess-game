@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { dropGuest, savedGuest } from "./guest.ts";
+import { dropGuest, savedGuest } from "./guest";
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
@@ -9,24 +9,48 @@ export const AUTH_OFF = import.meta.env.VITE_AUTH_DISABLED === "1";
 const storage = {
   getItem(key: string) {
     try {
-      return (key.endsWith("-code-verifier") ? localStorage : sessionStorage).getItem(key);
+      const kept = localStorage.getItem(key);
+      if (kept !== null) return kept;
+      const old = sessionStorage.getItem(key);
+      if (old !== null) {
+        localStorage.setItem(key, old);
+        sessionStorage.removeItem(key);
+      }
+      return old;
     } catch {
       return null;
     }
   },
   setItem(key: string, value: string) {
     try {
-      (key.endsWith("-code-verifier") ? localStorage : sessionStorage).setItem(key, value);
+      localStorage.setItem(key, value);
     } catch {
     }
   },
   removeItem(key: string) {
     try {
-      (key.endsWith("-code-verifier") ? localStorage : sessionStorage).removeItem(key);
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
     } catch {
     }
   },
 };
+
+const confirmedSignup = (() => {
+  if (typeof window === "undefined") return false;
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("confirmed") !== "1") return false;
+  url.searchParams.delete("confirmed");
+  try {
+    window.history.replaceState(window.history.state, "", url.toString());
+  } catch {
+  }
+  return true;
+})();
+
+export function cameFromConfirmation() {
+  return confirmedSignup;
+}
 
 export const supabase =
   URL_ && KEY
@@ -72,7 +96,13 @@ export function wsProtocols(token: string | null) {
 export function returnUrl() {
   const url = new URL(window.location.href);
   url.hash = "";
-  for (const key of ["code", "error", "error_code", "error_description"]) url.searchParams.delete(key);
+  for (const key of ["code", "error", "error_code", "error_description", "confirmed"]) url.searchParams.delete(key);
+  return url.toString();
+}
+
+export function confirmUrl() {
+  const url = new URL(returnUrl());
+  url.searchParams.set("confirmed", "1");
   return url.toString();
 }
 
@@ -103,7 +133,15 @@ const linkFailure = (() => {
   return { code: code ?? error ?? "", description };
 })();
 
+export function hasLinkFailure() {
+  return linkFailure !== null && !linkTaken;
+}
+
+let linkTaken = false;
+
 export function takeLinkFailure() {
+  if (linkTaken) return "";
+  linkTaken = true;
   if (!linkFailure) return "";
   if (linkFailure.code === "otp_expired" || /expired|invalid/i.test(linkFailure.description)) {
     return `This email link has expired or was already used. Links work once, for ${linkLifetime()}. Ask for a new one below.`;
@@ -127,6 +165,7 @@ export function friendlyError(err: { message?: string; status?: number; code?: s
     return "Too many emails were sent. Wait a few minutes and try again.";
   }
   if (err.status === 429 || code.includes("rate_limit")) return "Too many attempts. Wait a minute and try again.";
+  if (code === "user_banned" || m.includes("user is banned")) return "This account is suspended.";
   if (code === "same_password") return "Choose a password different from your old one.";
   if (m.includes("failed to fetch") || m.includes("network")) return "Can't reach the sign-in service. Check your internet.";
   return err.message || "Something went wrong. Try again.";

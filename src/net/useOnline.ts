@@ -61,7 +61,8 @@ function setUrlRoom(room: string | null) {
   if (room) url.searchParams.set("game", room);
   else url.searchParams.delete("game");
   url.searchParams.delete("k");
-  history.replaceState(null, "", url);
+  history.replaceState(history.state, "", url);
+  window.dispatchEvent(new Event("tempo:address"));
 }
 
 export function inviteLink(room: string, key: string) {
@@ -272,7 +273,8 @@ export function useOnline() {
         return;
       }
       if (e.code === CLOSE_BANNED) {
-        window.location.reload();
+        wantOpen.current = false;
+        window.dispatchEvent(new Event("tempo:banned"));
         return;
       }
       if (e.code === CLOSE_UNAUTHORIZED) {
