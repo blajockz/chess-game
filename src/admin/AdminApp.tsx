@@ -1,6 +1,7 @@
 import "./AdminApp.css";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { supabase, friendlyError } from "../auth/supabase";
+import Captcha, { CAPTCHA_ON } from "../auth/Captcha";
 import type { Account } from "../auth/AuthProvider";
 import { AdminClient, AdminError } from "./api";
 
@@ -165,6 +166,8 @@ function Enroll({ onDone }: { onDone: () => void }) {
 }
 
 function Login({ email, note, onDone }: { email: string; note: string; onDone: () => void }) {
+  const [captcha, setCaptcha] = useState<string | null>(null);
+  const [captchaRound, setCaptchaRound] = useState(0);
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -175,10 +178,14 @@ function Login({ email, note, onDone }: { email: string; note: string; onDone: (
     if (!supabase || busy) return;
     if (!password) return setError("Enter your password.");
     if (!CODE.test(code)) return setError("Enter the 6-digit code from your authenticator app.");
+    if (CAPTCHA_ON && !captcha) return setError("Wait a second: the security check isn't finished yet.");
     setBusy(true);
     setError("");
+    const captchaToken = captcha ?? undefined;
+    setCaptcha(null);
+    setCaptchaRound((r) => r + 1);
     try {
-      const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+      const { error: err } = await supabase.auth.signInWithPassword({ email, password, options: { captchaToken } });
       if (err) throw err;
       await verifyCode(code);
       await client.start();
@@ -209,7 +216,8 @@ function Login({ email, note, onDone }: { email: string; note: string; onDone: (
         <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" name="code" />
       </label>
       {error && <p className="adm-error" role="alert">{error}</p>}
-      <button className="adm-btn adm-primary" disabled={busy}>
+      <Captcha action="admin" round={captchaRound} onToken={setCaptcha} />
+      <button className="adm-btn adm-primary" disabled={busy || (CAPTCHA_ON && !captcha)}>
         {busy ? "Checking…" : "Open the admin page"}
       </button>
       <a className="adm-link" href="/">

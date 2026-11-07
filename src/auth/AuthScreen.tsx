@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { LINK_MINUTES, RESEND_WAIT_S, confirmUrl, friendlyError, linkLifetime, returnUrl, supabase } from "./supabase";
 import { guestProblemText, useAuth } from "./AuthProvider";
 import { GuestProblem } from "./guest";
+import Captcha, { CAPTCHA_ON } from "./Captcha";
 
 type Mode = "signin" | "signup" | "forgot" | "reset";
 
@@ -178,10 +179,21 @@ export default function AuthScreen({ recovery = false, guest }: { recovery?: boo
   const [error, setError] = useState("");
   const [sent, setSent] = useState<Sent | null>(null);
   const [notice, setNotice] = useState("");
+  const [captcha, setCaptcha] = useState<string | null>(null);
+  const [captchaRound, setCaptchaRound] = useState(0);
+  const needsCaptcha = CAPTCHA_ON && (mode === "signin" || mode === "signup" || mode === "forgot");
+  function spendCaptcha() {
+    const token = captcha ?? undefined;
+    setCaptcha(null);
+    setCaptchaRound((r) => r + 1);
+    return token;
+  }
+  const captchaWait = "Wait a second: the security check above the button isn't finished yet.";
 
   useEffect(() => {
     if (!prompt || recovery) return;
     setMode("signin");
+    setCaptcha(null);
     setSent(null);
     setPassword("");
     if (prompt.email) setEmail(prompt.email);
@@ -191,6 +203,7 @@ export default function AuthScreen({ recovery = false, guest }: { recovery?: boo
 
   function go(next: Mode) {
     setMode(next);
+    setCaptcha(null);
     setError("");
     setNotice("");
     setSent(null);
@@ -199,13 +212,15 @@ export default function AuthScreen({ recovery = false, guest }: { recovery?: boo
 
   async function resend() {
     if (!supabase || !sent || busy) return;
+    if (CAPTCHA_ON && !captcha) return setError(captchaWait);
     setBusy(true);
     setError("");
+    const captchaToken = spendCaptcha();
     try {
       const { error: err } =
         sent.kind === "signup"
-          ? await supabase.auth.resend({ type: "signup", email: sent.email, options: { emailRedirectTo: confirmUrl() } })
-          : await supabase.auth.resetPasswordForEmail(sent.email, { redirectTo: returnUrl() });
+          ? await supabase.auth.resend({ type: "signup", email: sent.email, options: { emailRedirectTo: confirmUrl(), captchaToken } })
+          : await supabase.auth.resetPasswordForEmail(sent.email, { redirectTo: returnUrl(), captchaToken });
       if (err) setError(friendlyError(err));
       else setSent({ ...sent, at: Date.now(), again: true });
     } catch (err) {
@@ -249,11 +264,13 @@ export default function AuthScreen({ recovery = false, guest }: { recovery?: boo
       if (problem) return setError(problem);
     }
     if (mode === "signin" && !password) return setError("Enter your password.");
+    if (needsCaptcha && !captcha) return setError(captchaWait);
 
     setBusy(true);
+    const captchaToken = needsCaptcha ? spendCaptcha() : undefined;
     try {
       if (mode === "signin") {
-        const { error: err } = await supabase.auth.signInWithPassword({ email: mail, password });
+        const { error: err } = await supabase.auth.signInWithPassword({ email: mail, password, options: { captchaToken } });
         if (err) setError(friendlyError(err));
       } else if (mode === "signup") {
         holdSessions(true);
@@ -262,7 +279,7 @@ export default function AuthScreen({ recovery = false, guest }: { recovery?: boo
           signUpResult = await supabase.auth.signUp({
             email: mail,
             password,
-            options: { data: { display_name: name.trim().replace(/\s+/g, " ") }, emailRedirectTo: confirmUrl() },
+            options: { data: { display_name: name.trim().replace(/\s+/g, " ") }, emailRedirectTo: confirmUrl(), captchaToken },
           });
           if (signUpResult.data.session) await supabase.auth.signOut({ scope: "local" });
         } finally {
@@ -279,7 +296,7 @@ export default function AuthScreen({ recovery = false, guest }: { recovery?: boo
         }
         else askSignIn({ tone: "notice", text: "Your account is ready. Sign in to start playing.", email: mail });
       } else if (mode === "forgot") {
-        const { error: err } = await supabase.auth.resetPasswordForEmail(mail, { redirectTo: returnUrl() });
+        const { error: err } = await supabase.auth.resetPasswordForEmail(mail, { redirectTo: returnUrl(), captchaToken });
         if (err) setError(friendlyError(err));
         else setSent({ kind: "reset", email: mail, at: Date.now(), again: false });
       } else {
@@ -428,7 +445,16 @@ export default function AuthScreen({ recovery = false, guest }: { recovery?: boo
           )}
           {sent && <LinkNotice sent={sent} onResend={() => void resend()} busy={busy} />}
 
-          <button className="auth-submit" type="submit" disabled={busy}>
+          {needsCaptcha && (
+            <Captcha
+              key={mode}
+              action={mode === "signin" ? "signin" : mode === "signup" ? "signup" : "reset"}
+              round={captchaRound}
+              onToken={setCaptcha}
+            />
+          )}
+
+          <button className="auth-submit" type="submit" disabled={busy || (needsCaptcha && !captcha)}>
             {busy ? "Please wait…" : buttons[mode]}
           </button>
         </form>

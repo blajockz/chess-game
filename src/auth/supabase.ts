@@ -154,6 +154,9 @@ export function friendlyError(err: { message?: string; status?: number; code?: s
   const m = (err.message ?? "").toLowerCase();
   const code = err.code ?? "";
   if (code === "invalid_credentials" || m.includes("invalid login credentials")) return "Wrong email or password.";
+  if (code === "captcha_failed" || m.includes("captcha")) {
+    return "The security check failed or expired. Wait for it to finish, then try again.";
+  }
   if (code === "email_not_confirmed" || m.includes("email not confirmed")) {
     return "Confirm your email first: open the link we sent you.";
   }

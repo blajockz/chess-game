@@ -490,3 +490,17 @@
 .auth-ban-facts.is-forever {
   grid-template-columns: 1fr;
 }
+
+.captcha {
+  margin: 4px 0 2px;
+}
+
+.captcha-box {
+  min-height: 65px;
+  display: flex;
+  justify-content: center;
+}
+
+.captcha-box.is-off {
+  min-height: 0;
+}
