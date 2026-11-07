@@ -32,7 +32,7 @@ export function usePresence(userId: string | null) {
         if (stopped) return;
         if (e.code === 1008) return;
         if (e.code === CLOSE_BANNED) {
-          window.location.reload();
+          window.dispatchEvent(new Event("tempo:banned"));
           return;
         }
         if (e.code === CLOSE_UNAUTHORIZED) {

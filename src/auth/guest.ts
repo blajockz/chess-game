@@ -9,11 +9,13 @@ export class GuestProblem extends Error {
   code: string;
   until: string | null;
   reason: string | null;
-  constructor(code: string, message: string, until: string | null = null, reason: string | null = null) {
+  since: string | null;
+  constructor(code: string, message: string, until: string | null = null, reason: string | null = null, since: string | null = null) {
     super(message);
     this.code = code;
     this.until = until;
     this.reason = reason;
+    this.since = since;
   }
 }
 
@@ -88,9 +90,16 @@ export async function becomeGuest(): Promise<GuestPass> {
     message?: string;
     until?: string;
     reason?: string | null;
+    since?: string | null;
   };
   if (!res.ok || typeof body.token !== "string") {
-    throw new GuestProblem(body.error ?? "failed", body.message ?? "Couldn't start a guest game. Try again.", body.until ?? null, body.reason ?? null);
+    throw new GuestProblem(
+      body.error ?? "failed",
+      body.message ?? "Couldn't start a guest game. Try again.",
+      body.until ?? null,
+      body.reason ?? null,
+      body.since ?? null
+    );
   }
   const pass: GuestPass = { id: body.id!, name: body.name!, token: body.token, expiresAt: body.expiresAt! };
   try {
@@ -100,7 +109,9 @@ export async function becomeGuest(): Promise<GuestPass> {
   return pass;
 }
 
-export type GuestCheck = { ok: true; banned: { until: string; reason: string | null } | null } | { ok: false };
+export type Ban = { until: string; reason: string | null; since?: string | null };
+
+export type GuestCheck = { ok: true; banned: Ban | null } | { ok: false };
 
 export async function checkGuest(pass: GuestPass): Promise<GuestCheck> {
   try {
@@ -111,7 +122,7 @@ export async function checkGuest(pass: GuestPass): Promise<GuestCheck> {
     });
     if (res.status === 401) return { ok: false };
     if (!res.ok) return { ok: true, banned: null };
-    const body = (await res.json()) as { banned?: { until: string; reason: string | null } | null };
+    const body = (await res.json()) as { banned?: Ban | null };
     return { ok: true, banned: body.banned ?? null };
   } catch {
     return { ok: true, banned: null };

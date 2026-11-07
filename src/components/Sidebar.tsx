@@ -8,6 +8,7 @@ type Props = {
   onOpen: (item: SidebarItem) => void;
   account?: { name: string; role: "user" | "admin"; guest?: boolean } | null;
   onSignOut?: () => void;
+  current?: "play" | "puzzles";
 };
 
 function Icon({ kind }: { kind: SidebarItem }) {
@@ -39,7 +40,7 @@ const ITEMS: { id: SidebarItem; label: string; hint: string }[] = [
   { id: "friend", label: "Play a friend", hint: "Create a link and play a friend online" },
 ];
 
-export default function Sidebar({ open, onOpen, account, onSignOut }: Props) {
+export default function Sidebar({ open, onOpen, account, onSignOut, current = "play" }: Props) {
   return (
     <nav className="sidebar" aria-label="Games">
       {ITEMS.map((item) => (
@@ -55,6 +56,23 @@ export default function Sidebar({ open, onOpen, account, onSignOut }: Props) {
           <span className="sb-label">{item.label}</span>
         </button>
       ))}
+      <a
+        className={"sb-item sb-puzzles" + (current === "puzzles" ? " is-on" : "")}
+        href="/puzzles"
+        aria-current={current === "puzzles" ? "page" : undefined}
+        title="Solve chess puzzles at your level"
+      >
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path
+            d="M9 4.5h2.2a1.9 1.9 0 1 1 3.6 0H17a1.5 1.5 0 0 1 1.5 1.5v2.2a1.9 1.9 0 1 0 0 3.6V17a1.5 1.5 0 0 1-1.5 1.5h-2.2a1.9 1.9 0 1 0-3.6 0H9A1.5 1.5 0 0 1 7.5 17v-2.2a1.9 1.9 0 1 1 0-3.6V6A1.5 1.5 0 0 1 9 4.5z"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <span className="sb-label">Puzzles</span>
+      </a>
       {account?.role === "admin" && (
         <a className="sb-item sb-admin" href="/admin" title="Open the admin dashboard (asks for your password and code)">
           <AdminCrest className="sb-admin-crest" />
@@ -88,7 +106,7 @@ export default function Sidebar({ open, onOpen, account, onSignOut }: Props) {
           <button
             className="account-out"
             onClick={onSignOut}
-            title={account.guest ? "Sign in or create an account (you leave this guest)" : undefined}
+            title={account.guest ? "Sign in or create an account (you can come back as this guest)" : undefined}
           >
             {account.guest ? "Sign in" : "Sign out"}
           </button>

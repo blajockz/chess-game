@@ -8,9 +8,9 @@ import type { Player } from "./auth.js";
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
 export const GUEST_TTL_MS = 30 * DAY;
-const PER_IP_BURST = 3;
-const PER_IP_REFILL = 1 / (20 * 60);
-const PER_IP_PER_DAY = Number(process.env.GUESTS_PER_IP_PER_DAY) || 10;
+const PER_IP_BURST = Number(process.env.GUESTS_PER_IP_BURST) || 10;
+const PER_IP_REFILL = 1 / 120;
+const PER_IP_PER_DAY = Number(process.env.GUESTS_PER_IP_PER_DAY) || 60;
 const GLOBAL_BURST = 60;
 const GLOBAL_PER_SECOND = 1;
 const EXTRA_BITS = 2;
@@ -82,13 +82,14 @@ export function guestPlayer(pass: GuestPass): Player {
   return { id: pass.id, email: null, name: pass.name, aal: "aal1", amr: [], iat: 0, guest: true, admin: false };
 }
 
-type GuestRecord = { at: number; found: boolean; bannedUntil: number | null; banReason: string | null };
-type IpBan = { at: number; until: number | null; reason: string | null };
+type GuestRecord = { at: number; found: boolean; bannedUntil: number | null; banReason: string | null; bannedAt: number | null };
+type IpBan = { at: number; until: number | null; reason: string | null; since: number | null };
+export type BanInfo = { until: number; reason: string | null; since: number | null };
 
 const records = new Map<string, GuestRecord>();
 const ipBans = new Map<string, IpBan>();
 const localGuests = new Map<string, { name: string; ip: string; created: number }>();
-const localIpBans = new Map<string, { until: number; reason: string | null }>();
+const localIpBans = new Map<string, { until: number; reason: string | null; since: number | null }>();
 
 function trim<K, V>(map: Map<K, V>, max = 5000) {
   if (map.size > max) map.delete(map.keys().next().value as K);
@@ -97,17 +98,18 @@ function trim<K, V>(map: Map<K, V>, max = 5000) {
 export async function guestRecord(id: string, maxAgeMs = CACHE_MS): Promise<GuestRecord> {
   const hit = records.get(id);
   if (hit && Date.now() - hit.at < maxAgeMs) return hit;
-  const entry: GuestRecord = { at: Date.now(), found: false, bannedUntil: null, banReason: null };
+  const entry: GuestRecord = { at: Date.now(), found: false, bannedUntil: null, banReason: null, bannedAt: null };
   if (!LOGS_ON) {
     entry.found = localGuests.has(id);
   } else {
     try {
-      const res = await rest("GET", `guests?id=eq.${id}&select=banned_until,ban_reason`, undefined, "");
-      const row = ((await res.json()) as { banned_until?: string | null; ban_reason?: string | null }[])[0];
+      const res = await rest("GET", `guests?id=eq.${id}&select=*`, undefined, "");
+      const row = ((await res.json()) as { banned_until?: string | null; ban_reason?: string | null; banned_at?: string | null }[])[0];
       if (row) {
         entry.found = true;
         entry.bannedUntil = row.banned_until ? Date.parse(row.banned_until) : null;
         entry.banReason = row.ban_reason ?? null;
+        entry.bannedAt = row.banned_at ? Date.parse(row.banned_at) : null;
       }
     } catch (err) {
       console.warn("Couldn't read a guest:", (err as Error).message);
@@ -120,37 +122,38 @@ export async function guestRecord(id: string, maxAgeMs = CACHE_MS): Promise<Gues
   return entry;
 }
 
-export async function ipBan(ip: string, maxAgeMs = CACHE_MS): Promise<{ until: number; reason: string | null } | null> {
+export async function ipBan(ip: string, maxAgeMs = CACHE_MS): Promise<BanInfo | null> {
   if (ip.startsWith("unknown")) return null;
   let hit = ipBans.get(ip);
   if (!hit || Date.now() - hit.at >= maxAgeMs) {
-    const entry: IpBan = { at: Date.now(), until: null, reason: null };
+    const entry: IpBan = { at: Date.now(), until: null, reason: null, since: null };
     if (!LOGS_ON) {
       const b = localIpBans.get(ip);
       if (b) Object.assign(entry, b);
     } else {
       try {
-        const res = await rest("GET", `ip_bans?ip=eq.${encodeURIComponent(ip)}&select=banned_until,reason`, undefined, "");
-        const row = ((await res.json()) as { banned_until: string; reason: string | null }[])[0];
+        const res = await rest("GET", `ip_bans?ip=eq.${encodeURIComponent(ip)}&select=banned_until,reason,created_at`, undefined, "");
+        const row = ((await res.json()) as { banned_until: string; reason: string | null; created_at?: string | null }[])[0];
         if (row) {
           entry.until = Date.parse(row.banned_until);
           entry.reason = row.reason ?? null;
+          entry.since = row.created_at ? Date.parse(row.created_at) : null;
         }
       } catch (err) {
         console.warn("Couldn't read an address ban:", (err as Error).message);
-        if (hit) return hit.until && hit.until > Date.now() ? { until: hit.until, reason: hit.reason } : null;
+        if (hit) return hit.until && hit.until > Date.now() ? { until: hit.until, reason: hit.reason, since: hit.since } : null;
       }
     }
     ipBans.set(ip, entry);
     trim(ipBans);
     hit = entry;
   }
-  return hit.until && hit.until > Date.now() ? { until: hit.until, reason: hit.reason } : null;
+  return hit.until && hit.until > Date.now() ? { until: hit.until, reason: hit.reason, since: hit.since } : null;
 }
 
-export async function guestBan(id: string, ip: string, maxAgeMs = CACHE_MS) {
+export async function guestBan(id: string, ip: string, maxAgeMs = CACHE_MS): Promise<BanInfo | null> {
   const rec = await guestRecord(id, maxAgeMs);
-  if (rec.bannedUntil && rec.bannedUntil > Date.now()) return { until: rec.bannedUntil, reason: rec.banReason };
+  if (rec.bannedUntil && rec.bannedUntil > Date.now()) return { until: rec.bannedUntil, reason: rec.banReason, since: rec.bannedAt };
   return ipBan(ip, maxAgeMs);
 }
 
@@ -162,7 +165,7 @@ export function forgetIp(ip: string) {
 }
 
 export function localIpBan(ip: string, until: number, reason: string | null) {
-  localIpBans.set(ip, { until, reason });
+  localIpBans.set(ip, { until, reason, since: Date.now() });
   ipBans.delete(ip);
 }
 
@@ -225,9 +228,10 @@ export async function createGuest(req: IncomingMessage, ip: string, challengeId:
     throw refuse("ip_banned", "Guest play is suspended for your network.", 403, {
       until: new Date(ban.until).toISOString(),
       reason: ban.reason,
+      since: ban.since ? new Date(ban.since).toISOString() : null,
     });
   }
-  if (!perIp.take(ip)) throw refuse("too_many", "Too many guests from your network. Wait a while, or sign in.", 429, { retryAfter: 20 * 60 });
+  if (!perIp.take(ip)) throw refuse("too_many", "Too many guests from your network. Wait a few minutes, or sign in.", 429, { retryAfter: 120 });
   if (!everyone.take("all")) throw refuse("busy", "Too many new guests right now. Try again in a minute.", 429, { retryAfter: 60 });
   let today = 0;
   try {
@@ -266,7 +270,7 @@ export async function createGuest(req: IncomingMessage, ip: string, challengeId:
         throw refuse("unavailable", "Guest play is unavailable right now. Try again later.", 503);
       }
     }
-    records.set(id, { at: Date.now(), found: true, bannedUntil: null, banReason: null });
+    records.set(id, { at: Date.now(), found: true, bannedUntil: null, banReason: null, bannedAt: null });
     logEvent("guest_created", req, { userId: id, detail: { name } });
     const { token, exp } = issue(id, name);
     return { id, name, token, expiresAt: new Date(exp * 1000).toISOString() };

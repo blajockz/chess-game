@@ -438,7 +438,7 @@ async function runOp(req: IncomingMessage, s: AdminSession, player: Player, op: 
       const until = minutes === null ? "9999-12-31T00:00:00.000Z" : new Date(Date.now() + minutes * MIN).toISOString();
       const ips = withIps ? (guest.ips ?? []).filter((ip) => IP_KEY.test(ip)) : [];
       await audit(req, player.id, "ban_guest", id, { name: guest.name, minutes, reason, until, ips });
-      await rest("PATCH", `guests?id=eq.${id}`, { banned_until: until, ban_reason: reason });
+      await rest("PATCH", `guests?id=eq.${id}`, { banned_until: until, ban_reason: reason, banned_at: new Date().toISOString() });
       if (ips.length) {
         const existing = await getRows(`ip_bans?ip=in.(${ips.map((ip) => `"${ip}"`).join(",")})&select=ip,banned_until`);
         const rows = ips
@@ -461,7 +461,7 @@ async function runOp(req: IncomingMessage, s: AdminSession, player: Player, op: 
       const guest = await targetGuest(id);
       const bans = await getRows(`ip_bans?guest_id=eq.${id}&select=ip`);
       await audit(req, player.id, "unban_guest", id, { name: guest.name, ips: bans.map((b) => b.ip) });
-      await rest("PATCH", `guests?id=eq.${id}`, { banned_until: null, ban_reason: null });
+      await rest("PATCH", `guests?id=eq.${id}`, { banned_until: null, ban_reason: null, banned_at: null });
       await rest("DELETE", `ip_bans?guest_id=eq.${id}`);
       forgetGuest(id);
       bans.forEach((b) => forgetIp(String(b.ip)));
@@ -487,11 +487,10 @@ async function runOp(req: IncomingMessage, s: AdminSession, player: Player, op: 
       if (target.role === "admin") throw new AdminError("not_allowed", "Remove the admin role before banning an admin.");
       const until = minutes === null ? "9999-12-31T00:00:00.000Z" : new Date(Date.now() + minutes * MIN).toISOString();
       await audit(req, player.id, "ban", id, { minutes, reason, until });
-      await rest("PATCH", `profiles?id=eq.${id}`, { banned_until: until, ban_reason: reason });
+      await rest("PATCH", `profiles?id=eq.${id}`, { banned_until: until, ban_reason: reason, banned_at: new Date().toISOString() });
       forgetProfile(id);
-      const supabaseOk = await supabaseBan(id, minutes === null ? 100 * 365 * 24 * 60 : minutes);
       const kicked = hooks.kickUser(id, 4003, "Account suspended");
-      return { ok: true, until, kicked, supabase: supabaseOk };
+      return { ok: true, until, kicked };
     }
 
     case "unban": {
@@ -499,7 +498,7 @@ async function runOp(req: IncomingMessage, s: AdminSession, player: Player, op: 
       const id = uuid(a.id);
       await targetProfile(id);
       await audit(req, player.id, "unban", id);
-      await rest("PATCH", `profiles?id=eq.${id}`, { banned_until: null, ban_reason: null });
+      await rest("PATCH", `profiles?id=eq.${id}`, { banned_until: null, ban_reason: null, banned_at: null });
       forgetProfile(id);
       const supabaseOk = await supabaseBan(id, null);
       return { ok: true, supabase: supabaseOk };

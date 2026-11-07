@@ -185,6 +185,7 @@ export type Profile = {
   name: string | null;
   bannedUntil: number | null;
   banReason: string | null;
+  bannedAt: number | null;
   found: boolean;
 };
 const profiles = new Map<string, Profile>();
@@ -192,16 +193,22 @@ const profiles = new Map<string, Profile>();
 export async function profileOf(userId: string, maxAgeMs = 60_000): Promise<Profile> {
   const hit = profiles.get(userId);
   if (hit && Date.now() - hit.at < maxAgeMs) return hit;
-  const entry: Profile = { at: Date.now(), role: "user", name: null, bannedUntil: null, banReason: null, found: false };
+  const entry: Profile = { at: Date.now(), role: "user", name: null, bannedUntil: null, banReason: null, bannedAt: null, found: false };
   if (LOGS_ON) {
     try {
       const res = await rest(
         "GET",
-        `profiles?id=eq.${encodeURIComponent(userId)}&select=role,display_name,banned_until,ban_reason`,
+        `profiles?id=eq.${encodeURIComponent(userId)}&select=*`,
         undefined,
         ""
       );
-      const rows = (await res.json()) as { role?: string; display_name?: string; banned_until?: string | null; ban_reason?: string | null }[];
+      const rows = (await res.json()) as {
+        role?: string;
+        display_name?: string;
+        banned_until?: string | null;
+        ban_reason?: string | null;
+        banned_at?: string | null;
+      }[];
       const row = rows[0];
       if (row) {
         entry.found = true;
@@ -209,6 +216,7 @@ export async function profileOf(userId: string, maxAgeMs = 60_000): Promise<Prof
         entry.name = row.display_name ?? null;
         entry.bannedUntil = row.banned_until ? Date.parse(row.banned_until) : null;
         entry.banReason = row.ban_reason ?? null;
+        entry.bannedAt = row.banned_at ? Date.parse(row.banned_at) : null;
       }
     } catch (err) {
       console.warn("Couldn't read a profile:", (err as Error).message);
