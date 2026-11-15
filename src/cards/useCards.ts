@@ -160,7 +160,7 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
     if (frozen.current) return t("Not now");
     if (game.ply < UNLOCK_PLY) {
       const left = Math.ceil((UNLOCK_PLY - game.ply) / 2);
-      return t("Cards unlock in {left} move{v2}", { left, v2: left > 1 ? "s" : "" });
+      return left === 1 ? t("Cards unlock in {left} move", { left }) : t("Cards unlock in {left} moves", { left });
     }
     if (game.turn !== side) return t("Wait for your turn");
     if (cur.lastPlayed[side] === game.ply) return t("One card per turn");

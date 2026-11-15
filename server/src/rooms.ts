@@ -38,6 +38,7 @@ import {
   type CardsState,
   type ClockMods,
 } from "../../shared/cards.js";
+import { PositionCounts } from "../../shared/cardGame.js";
 import { LIMITS } from "./limits.js";
 
 export type Peer = { send: (data: string) => void };
@@ -49,6 +50,7 @@ export type Room = {
   id: string;
   control: Control;
   chess: Chess;
+  positionCounts: PositionCounts;
   seats: Partial<Record<Side, Seat>>;
   status: RoomStatus;
   result: string | null;
@@ -139,10 +141,12 @@ export class Rooms {
     }
     const clean = sanitize(control);
     const mine: Side = side === "random" ? (randomInt(2) ? "w" : "b") : side;
+    const chess = new Chess();
     const room: Room = {
       id: this.newId(),
       control: clean,
-      chess: new Chess(),
+      chess,
+      positionCounts: new PositionCounts(chess.fen()),
       seats: {},
       status: "waiting",
       result: null,
@@ -319,6 +323,7 @@ export class Rooms {
     if (!played) throw new GameError("illegal_move", "That move isn't legal.");
 
     room.moves.push(played.san);
+    room.positionCounts.record(room.chess.fen());
     room.clock[side] += room.control.increment * 1000;
     room.clockTrail.push(Math.round(room.clock[side]));
     room.mods[side] = { ...NO_MODS };
@@ -340,7 +345,7 @@ export class Rooms {
     const c = room.chess;
     if (c.isCheckmate()) this.finish(room, `${NAME[side]} wins by checkmate`);
     else if (c.isStalemate()) this.finish(room, "Draw by stalemate");
-    else if (c.isThreefoldRepetition()) this.finish(room, "Draw by repetition");
+    else if (room.positionCounts.isThreefold(c.fen())) this.finish(room, "Draw by repetition");
     else if (c.isInsufficientMaterial()) this.finish(room, "Draw by insufficient material");
     else if (c.isDraw()) this.finish(room, "Draw");
 

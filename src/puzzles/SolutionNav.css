@@ -1,0 +1,17 @@
+.pz-solnav {
+  margin-top: 12px;
+}
+
+.pz-solnav .pz-solnav-buttons {
+  padding: 0;
+  border-top: 0;
+}
+
+.pz-solnav-count {
+  margin: 6px 0 0;
+  text-align: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  direction: ltr;
+}

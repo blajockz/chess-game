@@ -51,6 +51,6 @@ async function call<T>(path: string, body?: Record<string, unknown>): Promise<T>
 export const ratingApi = {
   get: () => call<Ratings>(""),
   setLevel: (level: Level) => call<Ratings>("/level", { level }),
-  start: (botElo: number, cards: boolean) => call<{ ticket: string; rating: Rating; abandoned: Change | null }>("/start", { botElo, cards }),
+  start: (botElo: number, cards: boolean) => call<{ ticket: string; rating: Rating; abandoned: Change | null; rated: boolean }>("/start", { botElo, cards }),
   leave: (ticket: string) => call<{ left: Change | null }>("/leave", { ticket }),
 };

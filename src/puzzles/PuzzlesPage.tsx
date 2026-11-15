@@ -17,6 +17,7 @@ import { CARDS, type CardId } from "../../shared/cards";
 import { DIFFICULTIES, THEME_GROUPS, themeName } from "./themes";
 import { useRating } from "../rating/useRating";
 import LevelDialog from "../rating/LevelDialog";
+import SolutionNav from "./SolutionNav";
 
 const KEY_DIFFICULTY = "tempo.puzzleDifficulty";
 const KEY_THEME = "tempo.puzzleTheme";
@@ -344,6 +345,7 @@ export default function PuzzlesPage({ account, onSignOut }: { account: Account; 
                 </button>
               )}
             </div>
+            {p.phase === "solution" && p.solution.total > 0 && <SolutionNav nav={p.solution} />}
           </section>
 
           {p.end && (

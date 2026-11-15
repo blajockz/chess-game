@@ -8,7 +8,7 @@ import { securityHeaders, clientIp } from "./security.js";
 import type { Room } from "./rooms.js";
 import type { Side, TimelineEvent } from "../../shared/protocol.js";
 import { categoryOf, type CardId, type PlayedCard } from "../../shared/cards.js";
-import { replayCardGame } from "../../shared/cardGame.js";
+import { PositionCounts, replayCardGame } from "../../shared/cardGame.js";
 import { rateBotGame, rateOnlineGame, type Change } from "./ratings.js";
 
 type Reply = ServerResponse;
@@ -67,17 +67,19 @@ export function winnerOf(result: string): Side | "draw" | null {
   return null;
 }
 
-export function checkSteps(steps: unknown): { steps: TimelineEvent[]; plies: number; chess: Chess } {
+export function checkSteps(steps: unknown): { steps: TimelineEvent[]; plies: number; chess: Chess; threefold: boolean } {
   if (!Array.isArray(steps) || steps.length === 0 || steps.length > MAX_STEPS) {
     throw new GamesError(400, "bad_game", "This game can't be saved.");
   }
   let chess = new Chess();
+  const positionCounts = new PositionCounts(chess.fen());
   let plies = 0;
   const clean: TimelineEvent[] = [];
   for (const step of steps as Record<string, unknown>[]) {
     if (step?.t === "move" && typeof step.san === "string" && step.san.length <= 10) {
       try {
         chess.move(step.san);
+        positionCounts.record(chess.fen());
       } catch {
         throw new GamesError(400, "bad_game", "This game has an impossible move.");
       }
@@ -90,7 +92,7 @@ export function checkSteps(steps: unknown): { steps: TimelineEvent[]; plies: num
       throw new GamesError(400, "bad_game", "This game can't be saved.");
     }
   }
-  return { steps: clean, plies, chess };
+  return { steps: clean, plies, chess, threefold: positionCounts.isThreefold(chess.fen()) };
 }
 
 function cleanControl(c: unknown): Control {
@@ -200,15 +202,19 @@ async function saveBotGame(me: Me, body: Record<string, unknown>) {
   const result = typeof body.result === "string" ? body.result.slice(0, 120) : "";
   const winner = winnerOf(result);
   if (!winner) throw new GamesError(400, "bad_game", "Only finished games are saved.");
-  const { steps, plies, chess } = checkSteps(body.steps);
+  const { steps, plies, chess, threefold } = checkSteps(body.steps);
   if (plies < 2) throw new GamesError(400, "bad_game", "Games that end before both players moved are not saved.");
   const mated = chess.isCheckmate();
+  const mateWinner: Side | null = mated ? (chess.turn() === "w" ? "b" : "w") : null;
   if (
-    (mated && winner !== (chess.turn() === "w" ? "b" : "w")) ||
+    (mated && winner !== mateWinner) ||
     (/checkmate/i.test(result) && !mated) ||
     (/stalemate/i.test(result) && !chess.isStalemate())
   ) {
     throw new GamesError(400, "bad_game", "This result doesn't match the board.");
+  }
+  if (winner === you && /resignation/i.test(result)) {
+    throw new GamesError(400, "bad_game", "A bot win by resignation can't be verified.");
   }
   const control = cleanControl(body.control);
   const cards = body.cards === true;
@@ -233,7 +239,8 @@ async function saveBotGame(me: Me, body: Record<string, unknown>) {
   const bot = `Shatranj Bot · ${elo}`;
   let change: Change | null = null;
   if (body.rated === true) {
-    const score = winner === "draw" ? 0.5 : winner === you ? 1 : 0;
+    const ruleDraw = chess.isStalemate() || chess.isInsufficientMaterial() || threefold || chess.isDrawByFiftyMoves();
+    const score = winner === "draw" ? (ruleDraw ? 0.5 : null) : winner !== you ? 0 : mateWinner === you ? 1 : null;
     change = await rateBotGame(me.id, cards ? "cards" : "chess", body.ticket, elo, score);
   }
   const id = await insert({
