@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import "./ActionCard.css";
 import { useId, useMemo, type CSSProperties, type ReactNode } from "react";
 import { CARDS, type CardId } from "../cards/cards";
@@ -329,19 +330,19 @@ export default function ActionCard({
 
       {front && (
         <>
-          <span className="acard-cost" aria-label={`Cost ${def.cost}`}>
+          <span className="acard-cost" aria-label={t("Cost {cost}", { cost: def.cost })}>
             {def.cost}
           </span>
-          <span className="acard-kind">{def.kind === "time" ? "Time" : "Board"}</span>
-          <span className="acard-name">{def.name}</span>
-          <span className="acard-text">{def.text}</span>
+          <span className="acard-kind">{def.kind === "time" ? t("Time") : t("Board")}</span>
+          <span className="acard-name">{t(def.name)}</span>
+          <span className="acard-text">{t(def.text)}</span>
         </>
       )}
     </>
   );
 
   const style = { "--card-w": `${width}px` } as CSSProperties;
-  const label = front ? `${def.name}, cost ${def.cost}. ${def.text}` : "Action card";
+  const label = front ? t("{name}, cost {cost}. {text}", { name: t(def.name), cost: def.cost, text: t(def.text) }) : t("Action card");
 
   if (onClick) {
     return (

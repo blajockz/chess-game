@@ -145,7 +145,8 @@ export function securityHeaders(req: IncomingMessage): Record<string, string> {
   const extra = EXTRA_ORIGINS.map((o) => " " + o.replace(/^http/, "ws")).join("");
   const csp = [
     "default-src 'self'",
-    "script-src 'self' 'wasm-unsafe-eval'",
+    "script-src 'self' 'wasm-unsafe-eval' https://challenges.cloudflare.com",
+    "frame-src https://challenges.cloudflare.com",
     "worker-src 'self'",
     "style-src 'self' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
@@ -222,6 +223,10 @@ export function readMessage(raw: Buffer | ArrayBuffer | Buffer[], isBinary: bool
         reclaim: msg.reclaim === true,
         pow: msg.pow as string | undefined,
       };
+    }
+    case "joinCode": {
+      if (typeof msg.code !== "string" || msg.code.length > 20 || !optional(msg.pow, nonce)) return null;
+      return { t: "joinCode", code: msg.code, pow: msg.pow as string | undefined };
     }
     case "move": {
       if (typeof msg.from !== "string" || !SQUARE.test(msg.from)) return null;

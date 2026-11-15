@@ -1,7 +1,9 @@
+import { t } from "../i18n";
 import "./CardPanel.css";
 import { useEffect, useState } from "react";
 import ActionCard from "./ActionCard";
-import { CARDS, MAX_CHARGE, type CardId } from "../cards/cards";
+import CardGuide from "./CardGuide";
+import { CARDS, MAX_CHARGE, type CardId, type Category } from "../cards/cards";
 
 type Side = "w" | "b";
 
@@ -10,6 +12,7 @@ type Props = {
   hand: CardId[];
   used: Record<Side, CardId[]>;
   charge: Record<Side, number>;
+  category: Category;
   whyNot: (card: CardId, side: Side) => string | null;
   targeting: { card: CardId; picks: string[] } | null;
   note: string | null;
@@ -18,16 +21,26 @@ type Props = {
   onCancel: () => void;
 };
 
+const GUIDE_SEEN = "tempo.cardguide";
+
+function guideSeen() {
+  try {
+    return localStorage.getItem(GUIDE_SEEN) === "1";
+  } catch {
+    return true;
+  }
+}
+
 const PROMPT: Partial<Record<CardId, string[]>> = {
-  shield: ["Choose one of your pieces to shield"],
-  leap: ["Choose a pawn to push"],
-  retreat: ["Choose a rook, knight or bishop to send home"],
-  swap: ["Choose a knight or bishop", "Choose the piece to trade with"],
+  shield: [t("Choose one of your pieces to shield")],
+  leap: [t("Choose a pawn to push")],
+  retreat: [t("Choose a rook, knight or bishop to send home")],
+  swap: [t("Choose a knight or bishop"), t("Choose the piece to trade with")],
 };
 
 function Pips({ value }: { value: number }) {
   return (
-    <span className="cp-pips" aria-label={`${value} of ${MAX_CHARGE} Charge`}>
+    <span className="cp-pips" aria-label={t("{value} of {MAX_CHARGE} Charge", { value, MAX_CHARGE })}>
       {Array.from({ length: MAX_CHARGE }, (_, i) => (
         <span key={i} className={"cp-pip" + (i < value ? " is-full" : "")} />
       ))}
@@ -40,6 +53,7 @@ export default function CardPanel({
   hand,
   used,
   charge,
+  category,
   whyNot,
   targeting,
   note,
@@ -48,6 +62,17 @@ export default function CardPanel({
   onCancel,
 }: Props) {
   const [hover, setHover] = useState<CardId | null>(null);
+  const [guide, setGuide] = useState(false);
+  const [isNew, setIsNew] = useState(() => !guideSeen());
+
+  function openGuide() {
+    setGuide(true);
+    setIsNew(false);
+    try {
+      localStorage.setItem(GUIDE_SEEN, "1");
+    } catch {
+    }
+  }
   const them: Side = you === "w" ? "b" : "w";
 
   useEffect(() => {
@@ -63,32 +88,44 @@ export default function CardPanel({
   if (targeting) {
     const steps = PROMPT[targeting.card] ?? [];
     line = {
-      text: `${steps[targeting.picks.length] ?? "Choose a square"} · Esc to cancel`,
+      text: t("{v1} · Esc to cancel", { v1: steps[targeting.picks.length] ?? "Choose a square" }),
       kind: "prompt",
     };
   } else if (note) {
     line = { text: note, kind: "note" };
   } else if (hover) {
-    const reason = used[you].includes(hover) ? "Already used" : whyNot(hover, you);
+    const reason = used[you].includes(hover) ? t("Already used") : whyNot(hover, you);
     line = {
-      text: `${CARDS[hover].name}: ${CARDS[hover].text}${reason ? ` (${reason})` : ""}`,
+      text: `${t(CARDS[hover].name)}: ${t(CARDS[hover].text)}${reason ? ` (${reason})` : ""}`,
       kind: "info",
     };
+  } else if (isNew) {
+    line = { text: t("New to action cards? Open the guide with the ? button."), kind: "info" };
   }
 
   return (
-    <section className="cp" aria-label="Action cards">
+    <section className="cp" aria-label={t("Action cards")}>
       <header className="cp-head">
-        <h2 className="cp-title">Cards</h2>
+        <h2 className="cp-title">
+          {t("Cards")}
+          <button
+            className={"cp-help" + (isNew ? " is-new" : "")}
+            onClick={openGuide}
+            aria-label={t("Card guide: what each card does")}
+            title={t("Card guide")}
+          >
+            ?
+          </button>
+        </h2>
         <span className="cp-charge">
-          Charge <Pips value={charge[you]} />
+          {t("Charge")} <Pips value={charge[you]} />
         </span>
       </header>
 
       <div className="cp-hand">
         {hand.map((card) => {
           const isUsed = used[you].includes(card);
-          const reason = isUsed ? "Already used" : whyNot(card, you);
+          const reason = isUsed ? t("Already used") : whyNot(card, you);
           return (
             <ActionCard
               key={card}
@@ -98,7 +135,7 @@ export default function CardPanel({
               compact
               disabled={!!reason}
               selected={targeting?.card === card}
-              title={`${CARDS[card].name}: ${CARDS[card].text}`}
+              title={`${t(CARDS[card].name)}: ${t(CARDS[card].text)}`}
               onHover={(on) => setHover(on ? card : null)}
               onClick={() => (targeting?.card === card ? onCancel() : onPlay(card))}
             />
@@ -111,7 +148,7 @@ export default function CardPanel({
       </p>
 
       {effects.length > 0 && (
-        <div className="cp-effects" aria-label="Active card effects">
+        <div className="cp-effects" aria-label={t("Active card effects")}>
           {effects.map((e) => (
             <span key={e} className="cp-effect">
               {e}
@@ -121,14 +158,16 @@ export default function CardPanel({
       )}
 
       <footer className="cp-foe">
-        <span className="cp-foe-label">Opponent</span>
+        <span className="cp-foe-label">{t("Opponent")}</span>
         <Pips value={charge[them]} />
         <span className="cp-foe-used">
           {used[them].length
-            ? `Used: ${used[them].map((c) => CARDS[c].name).join(", ")}`
-            : "No cards used yet"}
+            ? t("Used: {cards}", { cards: used[them].map((c) => t(CARDS[c].name)).join(", ") })
+            : t("No cards used yet")}
         </span>
       </footer>
+
+      {guide && <CardGuide cards={hand} category={category} inGame onClose={() => setGuide(false)} />}
     </section>
   );
 }

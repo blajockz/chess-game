@@ -6,6 +6,8 @@ import { LOGS_ON, banEnd, profileOf, rest } from "./logs.js";
 import { guestBan, guestRecord, isGuestToken, verifyGuestToken } from "./guests.js";
 import { RateLimiter } from "./limits.js";
 import { clientIp, securityHeaders } from "./security.js";
+import { CARD_IDS, type CardId } from "../../shared/cards.js";
+import { cardStep, isMoveStep, playStep, puzzleProblem, sameCardStep, type PuzzleBoard } from "../../shared/cardPuzzle.js";
 
 type Reply = ServerResponse;
 
@@ -17,6 +19,8 @@ const START_VOL = 0.06;
 const DIFFICULTY_STEP = 300;
 const MIN_TARGET = 400;
 const MAX_TARGET = 3000;
+
+const GUEST_LEVELS: Record<string, number> = { beginner: 800, intermediate: 1200, advanced: 1600 };
 
 const UCI = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
 const THEME = /^[A-Za-z0-9]{2,30}$/;
@@ -31,6 +35,9 @@ type PuzzleRow = {
   themes: string[];
   opening: string;
   game_url: string;
+  mode?: "chess" | "cards";
+  plays?: number;
+  cards?: { hand?: unknown } | null;
 };
 
 type Who = { id: string; guest: boolean };
@@ -45,6 +52,7 @@ type Session = {
   chess: Chess;
   started: number;
   done: boolean;
+  cards: { board: PuzzleBoard; hand: CardId[] } | null;
 };
 
 type RatingRow = {
@@ -76,7 +84,7 @@ const moveLimit = new RateLimiter(60, 3);
 const SCALE = 173.7178;
 const TAU = 0.75;
 
-function glicko2(me: { rating: number; rd: number; vol: number }, opp: { rating: number; rd: number }, score: 0 | 1) {
+export function glicko2(me: { rating: number; rd: number; vol: number }, opp: { rating: number; rd: number }, score: number) {
   const mu = (me.rating - 1500) / SCALE;
   const phi = me.rd / SCALE;
   const muJ = (opp.rating - 1500) / SCALE;
@@ -181,35 +189,55 @@ function sweep() {
 
 async function next(req: IncomingMessage, me: Who, body: Record<string, unknown>) {
   if (!LOGS_ON) throw new PuzzleError(503, "unavailable", "Puzzles aren't set up on this server.");
-  if (body.mode === "cards") throw new PuzzleError(403, "coming_soon", "Action-card puzzles are coming soon.");
+  const mode = body.mode === "cards" ? "cards" : "chess";
   const theme = typeof body.theme === "string" && THEME.test(body.theme) ? body.theme : null;
   const step = Math.max(-2, Math.min(2, Math.round(Number(body.difficulty) || 0)));
   const mine = me.guest ? null : await readRating(me.id);
-  const base = mine ? mine.rating : START_RATING;
+  const guestBase = GUEST_LEVELS[typeof body.level === "string" ? body.level : ""] ?? START_RATING;
+  const base = mine ? mine.rating : guestBase;
   const target = Math.round(Math.max(MIN_TARGET, Math.min(MAX_TARGET, base + step * DIFFICULTY_STEP)));
   const pick = async (exclude: string[]) => {
     const res = await rest(
       "POST",
       "rpc/next_puzzle",
-      { p_rating: target, p_user: me.guest ? null : me.id, p_theme: theme, p_exclude: exclude, p_mode: "chess" },
+      { p_rating: target, p_user: me.guest ? null : me.id, p_theme: theme, p_exclude: exclude, p_mode: mode },
       ""
     );
     return ((await res.json()) as PuzzleRow[])[0];
   };
   const recent = me.guest ? (guestSeen.get(me.id) ?? []) : [];
-  let row = await pick(recent);
-  if (!row && recent.length) row = await pick(recent.slice(-1));
-  if (!row) {
-    throw new PuzzleError(404, "none", theme ? "No puzzle left with this theme. Try another one." : "No puzzle found. Try again later.");
+  let row: PuzzleRow | undefined;
+  let line: string[] = [];
+  let chess = new Chess();
+  let cards: Session["cards"] = null;
+  for (let tries = 0; tries < 6; tries++) {
+    const skip = [...recent, ...broken];
+    row = await pick(skip);
+    if (!row && recent.length) row = await pick([...recent.slice(-1), ...broken]);
+    if (!row) break;
+    const ready = prepare(row, mode);
+    if (ready) {
+      ({ line, chess, cards } = ready);
+      break;
+    }
+    broken.add(row.id);
+    if (broken.size > 5000) broken.delete(broken.values().next().value as string);
+    console.warn(`Puzzle ${row.id} can't be played: skipped.`);
+    row = undefined;
   }
-  const line = row.moves.trim().split(/\s+/);
-  const chess = new Chess(row.fen);
-  if (line.length < 2 || !play(chess, line[0])) throw new PuzzleError(500, "broken", "This puzzle is broken. Try the next one.");
+  if (!row) {
+    const what = mode === "cards" ? "card" : "theme";
+    throw new PuzzleError(
+      404,
+      "none",
+      theme ? `No puzzle left with this ${what}. Try another one.` : mode === "cards" ? "No action-card puzzle yet. Come back soon." : "No puzzle found. Try again later."
+    );
+  }
 
   sweep();
   const old = openBy.get(me.id);
   if (old) sessions.delete(old);
-  const s: Session = { id: newId(), owner: me.id, guest: me.guest, puzzle: row, line, next: 1, chess, started: Date.now(), done: false };
+  const s: Session = { id: newId(), owner: me.id, guest: me.guest, puzzle: row!, line, next: 1, chess, started: Date.now(), done: false, cards };
   sessions.set(s.id, s);
   openBy.set(me.id, s.id);
   if (me.guest) {
@@ -220,9 +248,30 @@ async function next(req: IncomingMessage, me: Who, body: Record<string, unknown>
   }
   return {
     session: s.id,
-    puzzle: { id: row.id, fen: row.fen, setup: line[0], color: chess.turn() },
+    puzzle: { id: row.id, fen: row.fen, setup: line[0], color: chess.turn(), ...(cards ? { cards: { hand: cards.hand } } : {}) },
     me: mine ? publicRating(mine) : null,
   };
+}
+
+const broken = new Set<string>();
+
+function prepare(row: PuzzleRow, mode: "chess" | "cards") {
+  const line = row.moves.trim().split(/\s+/);
+  let chess: Chess;
+  try {
+    chess = new Chess(row.fen);
+  } catch {
+    return null;
+  }
+  let cards: Session["cards"] = null;
+  if (mode === "cards") {
+    const hand = Array.isArray(row.cards?.hand) ? row.cards.hand.filter((c): c is CardId => CARD_IDS.includes(c as CardId)) : [];
+    const first = cardStep(line[1] ?? "");
+    if (puzzleProblem(row.fen, line) || !first || !hand.includes(first.card)) return null;
+    cards = { board: { chess, shield: null }, hand };
+  }
+  if (line.length < 2 || !play(chess, line[0])) return null;
+  return { line, chess, cards };
 }
 
 async function finish(s: Session, solved: boolean) {
@@ -254,6 +303,19 @@ async function finish(s: Session, solved: boolean) {
         rating_after: Math.round(after.rating),
         ms: Math.min(2_000_000_000, Date.now() - s.started),
       });
+      if (s.cards) {
+        const puzzle = glicko2(
+          { rating: s.puzzle.rating, rd: Math.max(45, s.puzzle.rating_dev || 150), vol: START_VOL },
+          { rating: mine.rating, rd: mine.rd },
+          solved ? 0 : 1
+        );
+        await rest(
+          "PATCH",
+          `puzzles?id=eq.${s.puzzle.id}`,
+          { rating: Math.round(puzzle.rating), rating_dev: Math.round(Math.max(60, puzzle.rd)), plays: (s.puzzle.plays ?? 0) + 1 },
+          "return=minimal"
+        ).catch(() => undefined);
+      }
       rating = {
         before: Math.round(mine.rating),
         after: Math.round(after.rating),
@@ -286,9 +348,40 @@ function sessionOf(me: Who, body: Record<string, unknown>) {
   return s;
 }
 
+async function cardMove(s: Session, step: string) {
+  const cards = s.cards!;
+  const expected = s.line[s.next];
+  const asCard = cardStep(step);
+  if (asCard) {
+    if (!cards.hand.includes(asCard.card)) throw new PuzzleError(400, "bad_move", "That card isn't in this puzzle.");
+    if (isMoveStep(expected)) throw new PuzzleError(400, "bad_move", "You already played a card: now make your move.");
+    if (!sameCardStep(step, expected)) {
+      const trial: PuzzleBoard = { chess: new Chess(cards.board.chess.fen()), shield: null };
+      if (!playStep(trial, step)) throw new PuzzleError(400, "illegal", "That card can't be played there.");
+      return { ok: false, ...(await finish(s, false)) };
+    }
+    playStep(cards.board, expected);
+    s.chess = cards.board.chess;
+    s.next += 1;
+    return { ok: true, done: false };
+  }
+  if (!UCI.test(step)) throw new PuzzleError(400, "bad_move", "That move can't be read.");
+  if (!playStep(cards.board, step)) throw new PuzzleError(400, "illegal", "That move isn't legal here.");
+  s.chess = cards.board.chess;
+  const right = (isMoveStep(expected) && step === expected) || s.chess.isCheckmate();
+  if (!right) return { ok: false, ...(await finish(s, false)) };
+  if (s.chess.isCheckmate() || s.next + 1 >= s.line.length) return { ok: true, ...(await finish(s, true)) };
+  const reply = s.line[s.next + 1];
+  playStep(cards.board, reply);
+  s.next += 2;
+  if (s.next >= s.line.length) return { ok: true, reply, ...(await finish(s, true)) };
+  return { ok: true, reply, done: false };
+}
+
 async function move(me: Who, body: Record<string, unknown>) {
   const s = sessionOf(me, body);
-  const uci = typeof body.move === "string" ? body.move : "";
+  const uci = typeof body.move === "string" ? body.move.slice(0, 20) : "";
+  if (s.cards) return cardMove(s, uci);
   if (!UCI.test(uci)) throw new PuzzleError(400, "bad_move", "That move can't be read.");
   const expected = s.line[s.next];
   const played = play(s.chess, uci);

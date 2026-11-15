@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 
 export type TimeControl = {
@@ -40,9 +41,9 @@ export function describeControl(tc: TimeControl) {
   const white = controlLabel(tc.initial, tc.increment);
   const handicap = tc.blackInitial !== undefined && tc.blackInitial !== tc.initial;
   const both = handicap
-    ? `${white} vs ${controlLabel(tc.blackInitial!, tc.increment)}`
+    ? t("{white} vs {black}", { white, black: controlLabel(tc.blackInitial!, tc.increment) })
     : white;
-  return `${both} ${categoryOf(tc)}`;
+  return `${both} ${t(categoryOf(tc))}`;
 }
 
 export function formatClock(ms: number) {
@@ -101,6 +102,7 @@ export function useClocks({ control, turn, ply, paused = false, sync = null }: O
   const [flagged, setFlagged] = useState<Side | null>(null);
   const [, force] = useState(0);
   const prevPly = useRef(ply);
+  const trail = useRef<number[]>([]);
   const prevControl = useRef(control);
 
   const running = ply > 0 && !paused && flagged === null;
@@ -179,6 +181,8 @@ export function useClocks({ control, turn, ply, paused = false, sync = null }: O
     const mover = turn === "w" ? "b" : "w";
     settle();
     ref.current[mover] += control.increment * 1000;
+    trail.current.length = Math.max(0, ply - 1);
+    if (ply > 0) trail.current.push(Math.round(ref.current[mover]));
     ref.current.mods[mover] = { ...NO_MODS };
 
     if (running) startSide(turn);
@@ -248,6 +252,7 @@ export function useClocks({ control, turn, ply, paused = false, sync = null }: O
     blackLow: black < 30000,
     adjust,
     setMods,
+    trail: () => [...trail.current],
     fast: (side: Side) => modsOf(side).rate > 1 && modsOf(side).extra > 0,
     frozenByCard: (side: Side) =>
       modsOf(side).free > 0 && (r.side !== side || now - r.at < modsOf(side).free),

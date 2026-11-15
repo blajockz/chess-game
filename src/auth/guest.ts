@@ -1,3 +1,4 @@
+import { t, translateMessage } from "../i18n";
 import { solvePow } from "../../shared/pow";
 import { DEFAULT_PORT } from "../../shared/protocol";
 
@@ -67,8 +68,8 @@ function networkProblem(): GuestProblem {
   return new GuestProblem(
     "server_unreachable",
     import.meta.env.DEV
-      ? "Can't reach the Tempo server on port 8787. Is it running (npm run dev in the server folder)?"
-      : "Can't reach the Tempo server. Check your internet, or try again in a minute."
+      ? t("Can't reach the Shatranj server on port 8787. Is it running (npm run dev in the server folder)?")
+      : t("Can't reach the Shatranj server. Check your internet, or try again in a minute.")
   );
 }
 
@@ -95,7 +96,7 @@ export async function becomeGuest(): Promise<GuestPass> {
   if (!res.ok || typeof body.token !== "string") {
     throw new GuestProblem(
       body.error ?? "failed",
-      body.message ?? "Couldn't start a guest game. Try again.",
+      body.message ? translateMessage(body.message) : t("Couldn't start a guest game. Try again."),
       body.until ?? null,
       body.reason ?? null,
       body.since ?? null

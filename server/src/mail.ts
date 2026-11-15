@@ -4,7 +4,7 @@ const HOST = process.env.SMTP_HOST ?? "";
 const PORT = Number(process.env.SMTP_PORT) || 465;
 const USER = process.env.SMTP_USER ?? "";
 const PASS = process.env.SMTP_PASS ?? "";
-const FROM = process.env.SMTP_FROM || (USER ? `Tempo Chess <${USER}>` : "");
+const FROM = process.env.SMTP_FROM || (USER ? `Shatranj Chess <${USER}>` : "");
 const SITE = (process.env.SITE_URL ?? "https://tempo-chess.onrender.com").replace(/\/+$/, "");
 const INSECURE = process.env.SMTP_INSECURE === "1";
 
@@ -39,20 +39,20 @@ export function cleanSubject(s: string) {
 
 export function render(subject: string, message: string, name: string | null) {
   const hello = name ? `Hi ${name},` : "Hi,";
-  const text = `${hello}\n\n${message}\n\n— The Tempo team\n${SITE}\n\nYou receive this because you have a Tempo account.`;
+  const text = `${hello}\n\n${message}\n\n— The Shatranj team\n${SITE}\n\nYou receive this because you have a Shatranj account.`;
   const paragraphs = escapeHtml(message)
     .split(/\n{2,}/)
     .map((p) => `<p style="margin:0 0 14px;line-height:1.55">${p.replace(/\n/g, "<br>")}</p>`)
     .join("");
   const html = `<div style="background:#121210;padding:32px 16px;font-family:Arial,sans-serif">
 <div style="max-width:520px;margin:0 auto;background:#191916;border:1px solid #2C2B26;border-radius:16px;padding:30px;color:#EDEAE1">
-<p style="margin:0 0 14px;font-family:Georgia,serif;font-size:24px;color:#B8914F">Tempo</p>
+<p style="margin:0 0 14px;font-family:Georgia,serif;font-size:24px;color:#B8914F">Shatranj</p>
 <h1 style="font-size:19px;margin:0 0 16px">${escapeHtml(subject)}</h1>
 <p style="margin:0 0 14px">${escapeHtml(hello)}</p>
 ${paragraphs}
-<p style="margin:18px 0 0;color:#8E8A7E">— The Tempo team</p>
-<a href="${SITE}" style="display:inline-block;margin-top:18px;padding:10px 20px;background:#B8914F;color:#17140f;border-radius:10px;font-weight:bold;text-decoration:none">Open Tempo</a>
-<p style="margin:22px 0 0;color:#8E8A7E;font-size:12px">You receive this because you have a Tempo account.</p>
+<p style="margin:18px 0 0;color:#8E8A7E">— The Shatranj team</p>
+<a href="${SITE}" style="display:inline-block;margin-top:18px;padding:10px 20px;background:#B8914F;color:#17140f;border-radius:10px;font-weight:bold;text-decoration:none">Open Shatranj</a>
+<p style="margin:22px 0 0;color:#8E8A7E;font-size:12px">You receive this because you have a Shatranj account.</p>
 </div></div>`;
   return { text, html };
 }

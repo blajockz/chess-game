@@ -3,7 +3,7 @@
 }
 
 .board-wrap.is-reviewing .board-frame {
-  box-shadow: 0 0 0 2px var(--brass), 0 28px 64px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 0 2px var(--brass), 0 0 24px rgba(219, 186, 122, 0.18), 0 28px 64px rgba(0, 0, 0, 0.55);
 }
 
 .board-wrap.is-reviewing .board {
@@ -21,11 +21,11 @@
   padding: 6px 8px 6px 14px;
   border: 0;
   border-radius: 999px;
-  color: #16150f;
-  background: var(--brass);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  color: var(--gold-ink);
+  background: var(--gold-fill);
+  box-shadow: inset 0 1px 0 rgba(255, 249, 232, 0.45), inset 0 -1px 0 rgba(90, 60, 20, 0.35), 0 8px 20px rgba(0, 0, 0, 0.45);
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: 700;
   white-space: nowrap;
   transform: translateX(-50%);
   animation: review-in 0.16s ease-out;
@@ -59,9 +59,10 @@
   width: 300px;
   max-width: 100%;
   margin-top: 14px;
-  border-radius: 12px;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card-fill);
+  border: 1px solid var(--edge);
+  box-shadow: var(--card-shadow);
   overflow: hidden;
 }
 
@@ -75,9 +76,11 @@
 
 .cp-title {
   margin: 0;
-  font-family: "Instrument Serif", Georgia, serif;
-  font-size: 18px;
-  font-weight: 400;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--gold-hi);
 }
 
 .cp-charge {
@@ -239,5 +242,55 @@
 @media (prefers-reduced-motion: reduce) {
   .card-reveal {
     animation-name: card-reveal-still;
+  }
+}
+
+.cp-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.cp-help {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: var(--gold-ink);
+  background: var(--gold-fill);
+  box-shadow: var(--gold-shadow);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 800;
+  line-height: 1;
+  transition: filter 0.12s ease, transform 0.12s ease;
+}
+
+.cp-help:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.cp-help:focus-visible {
+  outline: 2px solid var(--gold-hi);
+  outline-offset: 2px;
+}
+
+.cp-help.is-new {
+  animation: cp-help-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes cp-help-pulse {
+  50% {
+    box-shadow: var(--gold-shadow), 0 0 0 5px rgba(219, 186, 122, 0.28);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-help.is-new {
+    animation: none;
   }
 }

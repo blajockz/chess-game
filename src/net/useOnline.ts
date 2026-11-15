@@ -1,3 +1,4 @@
+import { t, translateMessage } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import {
   CLOSE_BANNED,
@@ -76,6 +77,7 @@ const FATAL = new Set([
   "invite_expired",
   "invite_used",
   "bad_invite",
+  "bad_code",
   "server_busy",
 ]);
 
@@ -119,7 +121,7 @@ export function useOnline() {
   const [update, setUpdate] = useState<Update | null>(null);
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
   const [active, setActive] = useState(false);
-  const [invite, setInvite] = useState<{ key: string; expiresAt: number } | null>(null);
+  const [invite, setInvite] = useState<{ key: string; expiresAt: number; code: string | null } | null>(null);
   const [rtt, setRtt] = useState<number | null>(null);
   const [retryInfo, setRetryInfo] = useState<{ attempt: number; at: number } | null>(null);
   const [offline, setOffline] = useState(() => typeof navigator !== "undefined" && navigator.onLine === false);
@@ -205,7 +207,7 @@ export function useOnline() {
       setUrlRoom(msg.state.room);
       setInvite(
         msg.invite
-          ? { key: msg.invite.key, expiresAt: performance.now() + msg.invite.expiresIn }
+          ? { key: msg.invite.key, expiresAt: performance.now() + msg.invite.expiresIn, code: msg.invite.code ?? null }
           : null
       );
       push(msg.state);
@@ -217,7 +219,7 @@ export function useOnline() {
       return;
     }
     if (msg.t === "error") {
-      setError({ code: msg.code, message: msg.message });
+      setError({ code: msg.code, message: translateMessage(msg.message) });
       if (msg.state) push(msg.state);
       const stop = FATAL.has(msg.code) || (FATAL_BEFORE_SEAT.has(msg.code) && !roomRef.current);
       if (stop) {
@@ -288,7 +290,7 @@ export function useOnline() {
     };
     ws.onerror = () => {
       if (!roomRef.current && !wantOpen.current) return;
-      setError({ code: "offline", message: "Can't reach the game server." });
+      setError({ code: "offline", message: t("Can't reach the game server.") });
     };
   }
 
@@ -324,13 +326,17 @@ export function useOnline() {
     connect();
   }
 
-  function create(control: Control, mySide: Side, cards = false) {
-    start({ t: "create", control, side: mySide, cards });
+  function create(control: Control, mySide: Side, cards = false, rated = false) {
+    start({ t: "create", control, side: mySide, cards, rated });
   }
 
   function join(code: string, inviteKey?: string | null) {
     const r = code.toUpperCase();
     start({ t: "join", room: r, ...loadToken(r), invite: inviteKey ?? undefined });
+  }
+
+  function joinCode(code: string) {
+    start({ t: "joinCode", code });
   }
 
   function send(msg: ClientMsg) {
@@ -427,6 +433,7 @@ export function useOnline() {
     },
     create,
     join,
+    joinCode,
     leave,
     move: (from: string, to: string, promotion: string | undefined, ply: number) =>
       send({ t: "move", from, to, promotion, ply }),

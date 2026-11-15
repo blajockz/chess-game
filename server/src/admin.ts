@@ -2,10 +2,11 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createCipheriv, createDecipheriv, createECDH, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
 import { bearer, secondsSince, verifyToken, type Player } from "./auth.js";
 import { LOGS_ON, banEnd, forgetProfile, logEvent, origin, profileOf, rest } from "./logs.js";
-import { clientIp, securityHeaders } from "./security.js";
+import { clientIp, ipKey, isPrivate, securityHeaders } from "./security.js";
 import { RateLimiter } from "./limits.js";
 import { MAIL_ON, cleanSubject, jobStatus, mailStatus, startJob, type Recipient } from "./mail.js";
 import { forgetGuest, forgetIp } from "./guests.js";
+import { clearEmailLimit } from "./emailLimit.js";
 
 const MIN = 60_000;
 const IDLE_MS = Number(process.env.ADMIN_IDLE_MS) || 15 * MIN;
@@ -336,6 +337,7 @@ function banMinutes(a: Record<string, unknown>) {
 }
 
 const IP_KEY = /^[0-9a-f.:/]{3,45}$/i;
+const ACCOUNT_BAN_IPS = 3;
 
 async function targetProfile(id: string) {
   const rows = await getRows(`profiles?id=eq.${id}&select=id,email,display_name,role,banned_until`);
@@ -427,6 +429,26 @@ async function runOp(req: IncomingMessage, s: AdminSession, player: Player, op: 
       return { rows: rows.map((r) => ({ ...r, ip_bans: bans.filter((b) => b.guest_id === r.id).map((b) => b.ip) })) };
     }
 
+    case "visitors": {
+      const limit = int(a.limit, 1, 200, 100);
+      const offset = int(a.offset, 0, 100_000, 0);
+      const parts = [
+        "select=ip,first_seen,last_seen,hits,pages,blocked,country,region,city,org,network,last_user_agent,last_path,user_ids,flags",
+        "order=last_seen.desc",
+        `limit=${limit}`,
+        `offset=${offset}`,
+      ];
+      const q = searchText(a.q);
+      if (q && /^[0-9a-f.:/]+$/i.test(q) && /[.:]/.test(q)) parts.push(`ip=like.${encodeURIComponent(q)}*`);
+      else if (q && /^[a-z]{2}$/i.test(q)) parts.push(`country=eq.${q.toUpperCase()}`);
+      else if (q) parts.push(`org=ilike.*${encodeURIComponent(q)}*`);
+      if (a.filter === "blocked") parts.push("blocked=gt.0");
+      if (a.filter === "today") parts.push(`last_seen=gte.${new Date(Date.now() - 24 * 60 * MIN).toISOString()}`);
+      if (a.filter === "accounts") parts.push("user_ids=neq.{}");
+      const rows = await getRows("visitors?" + parts.join("&"));
+      return { rows: rows.map((r) => ({ ...r, accounts: Array.isArray(r.user_ids) ? r.user_ids.length : 0, user_ids: undefined })) };
+    }
+
     case "banGuest": {
       stepUp(player);
       const id = uuid(a.id);
@@ -489,8 +511,29 @@ async function runOp(req: IncomingMessage, s: AdminSession, player: Player, op: 
       await audit(req, player.id, "ban", id, { minutes, reason, until });
       await rest("PATCH", `profiles?id=eq.${id}`, { banned_until: until, ban_reason: reason, banned_at: new Date().toISOString() });
       forgetProfile(id);
-      const kicked = hooks.kickUser(id, 4003, "Account suspended");
-      return { ok: true, until, kicked };
+      let ips: string[] = [];
+      if (a.ips !== false) {
+        try {
+          const seen = await getRows(`access_log?user_id=eq.${id}&ip=not.is.null&select=ip&order=at.desc&limit=300`);
+          ips = [...new Set(seen.map((r) => ipKey(String(r.ip))).filter((ip) => IP_KEY.test(ip) && !isPrivate(ip)))].slice(0, ACCOUNT_BAN_IPS);
+          if (ips.length) {
+            const existing = await getRows(`ip_bans?ip=in.(${ips.map((ip) => `"${ip}"`).join(",")})&select=ip,banned_until`);
+            const rows = ips
+              .filter((ip) => {
+                const old = existing.find((e) => e.ip === ip);
+                return !old || Date.parse(String(old.banned_until)) < Date.parse(until);
+              })
+              .map((ip) => ({ ip, banned_until: until, reason, user_id: id, created_by: player.id }));
+            if (rows.length) await rest("POST", "ip_bans?on_conflict=ip", rows, "resolution=merge-duplicates,return=minimal");
+            ips.forEach(forgetIp);
+          }
+        } catch (err) {
+          console.warn("Account banned, but its addresses couldn't be:", (err as Error).message);
+          ips = [];
+        }
+      }
+      const kicked = hooks.kickUser(id, 4003, "Account suspended") + (ips.length ? hooks.kickGuestsFrom(ips, 4003, "Guest play suspended") : 0);
+      return { ok: true, until, kicked, ips: ips.length };
     }
 
     case "unban": {
@@ -500,8 +543,16 @@ async function runOp(req: IncomingMessage, s: AdminSession, player: Player, op: 
       await audit(req, player.id, "unban", id);
       await rest("PATCH", `profiles?id=eq.${id}`, { banned_until: null, ban_reason: null, banned_at: null });
       forgetProfile(id);
+      let freed = 0;
+      try {
+        const bans = await getRows(`ip_bans?user_id=eq.${id}&select=ip`);
+        if (bans.length) await rest("DELETE", `ip_bans?user_id=eq.${id}`);
+        bans.forEach((b) => forgetIp(String(b.ip)));
+        freed = bans.length;
+      } catch {
+      }
       const supabaseOk = await supabaseBan(id, null);
-      return { ok: true, supabase: supabaseOk };
+      return { ok: true, supabase: supabaseOk, ips: freed };
     }
 
     case "setRole": {
@@ -514,6 +565,24 @@ async function runOp(req: IncomingMessage, s: AdminSession, player: Player, op: 
       await rest("PATCH", `profiles?id=eq.${id}`, { role: a.role });
       forgetProfile(id);
       if (a.role === "user") for (const [sid, other] of sessions) if (other.userId === id) sessions.delete(sid);
+      return { ok: true };
+    }
+
+    case "confirmEmail": {
+      const id = uuid(a.id);
+      const target = await targetProfile(id);
+      const res = await authAdmin("PUT", id, { email_confirm: true });
+      if (!res || !res.ok) throw new AdminError("failed", `Supabase refused (${res ? res.status : "no answer"}). Nothing changed.`);
+      await audit(req, player.id, "confirm_email", id, { name: target.display_name, email: maskEmail(target.email as string | null) });
+      return { ok: true };
+    }
+
+    case "resetEmailLimit": {
+      const id = uuid(a.id);
+      const target = await targetProfile(id);
+      if (typeof target.email !== "string" || !target.email) throw new AdminError("failed", "This account has no email address on file.");
+      await clearEmailLimit(target.email);
+      await audit(req, player.id, "reset_email_limit", id, { name: target.display_name, email: maskEmail(target.email) });
       return { ok: true };
     }
 

@@ -1,5 +1,8 @@
+import { t, translateMessage } from "../i18n";
 import { accessToken } from "../auth/supabase";
 import { apiBase } from "../auth/guest";
+import { localLevel } from "../rating/api";
+import type { CardId } from "../../shared/cards";
 
 export type MyRating = {
   rating: number;
@@ -10,9 +13,11 @@ export type MyRating = {
   bestStreak: number;
 };
 
+export type PuzzleKind = "chess" | "cards";
+
 export type PuzzleStart = {
   session: string;
-  puzzle: { id: string; fen: string; setup: string; color: "w" | "b" };
+  puzzle: { id: string; fen: string; setup: string; color: "w" | "b"; cards?: { hand: CardId[] } };
   me: MyRating | null;
 };
 
@@ -50,18 +55,19 @@ async function call<T>(action: string, body?: Record<string, unknown>): Promise<
       cache: "no-store",
     });
   } catch {
-    throw new PuzzleApiError(0, "offline", "Can't reach the Tempo server. Check your connection and try again.");
+    throw new PuzzleApiError(0, "offline", t("Can't reach the Shatranj server. Check your connection and try again."));
   }
   const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
   if (!res.ok) {
-    throw new PuzzleApiError(res.status, data.error ?? "failed", data.message ?? "Something went wrong. Try again.");
+    throw new PuzzleApiError(res.status, data.error ?? "failed", data.message ? translateMessage(data.message) : t("Something went wrong. Try again."));
   }
   return data as T;
 }
 
 export const puzzleApi = {
   me: () => call<{ me: MyRating | null }>("me"),
-  next: (difficulty: number, theme: string | null) => call<PuzzleStart>("next", { difficulty, theme, mode: "chess" }),
+  next: (kind: PuzzleKind, difficulty: number, theme: string | null) =>
+    call<PuzzleStart>("next", { difficulty, theme, mode: kind, level: localLevel() }),
   move: (session: string, move: string) => call<MoveAnswer>("move", { session, move }),
   giveUp: (session: string) => call<PuzzleEnd>("giveup", { session }),
 };

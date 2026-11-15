@@ -4,9 +4,9 @@
   width: calc(var(--sq) * 8 + 24px);
   max-width: 100%;
   aspect-ratio: 1 / 0.92;
-  border-radius: 14px;
-  border: 1px solid var(--line);
-  background: #14100c;
+  border-radius: 16px;
+  border: 1px solid var(--edge);
+  background: radial-gradient(60% 50% at 50% 45%, rgba(166, 110, 50, 0.14), transparent 70%), #0f0b08;
   color: var(--muted);
   font-size: 13px;
 }

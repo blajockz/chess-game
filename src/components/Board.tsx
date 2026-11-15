@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import "./Board.css";
 import { useEffect, useRef, useState } from "react";
 import type { Square } from "chess.js";
@@ -5,6 +6,10 @@ import type { Square } from "chess.js";
 type PromotionPiece = "q" | "r" | "b" | "n";
 type Pending = { from: Square; to: Square; color: "w" | "b" };
 type Arrow = { from: Square; to: Square };
+
+export type Hint = { from: Square; to: Square; tone: "best" | "played" };
+
+export type Badge = { square: Square; mark: string; tone: string; label: string };
 
 const GLYPHS: Record<string, string> = {
   k: "♚",
@@ -16,12 +21,12 @@ const GLYPHS: Record<string, string> = {
 };
 
 const NAMES: Record<string, string> = {
-  p: "pawn",
-  r: "rook",
-  n: "knight",
-  b: "bishop",
-  q: "queen",
-  k: "king",
+  p: t("pawn"),
+  r: t("rook"),
+  n: t("knight"),
+  b: t("bishop"),
+  q: t("queen"),
+  k: t("king"),
 };
 
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -55,6 +60,8 @@ type Props = {
   cardPicked?: Square[];
   cardFlash?: { squares: Square[]; key: number } | null;
   shielded?: Square | null;
+  hints?: Hint[];
+  badge?: Badge | null;
 };
 
 export default function Board({
@@ -78,6 +85,8 @@ export default function Board({
   cardPicked = [],
   cardFlash = null,
   shielded = null,
+  hints = [],
+  badge = null,
 }: Props) {
   const targeting = cardTargets.length > 0 || cardPicked.length > 0;
   const [arrows, setArrows] = useState<Arrow[]>([]);
@@ -167,6 +176,53 @@ export default function Board({
     const row = 8 - Number(square[1]);
     return flipped ? { c: 7 - col, r: 7 - row } : { c: col, r: row };
   }
+
+  function arrowShape(a: Arrow) {
+    const f = viewOf(a.from);
+    const t = viewOf(a.to);
+    const fx = f.c + 0.5;
+    const fy = f.r + 0.5;
+    const tx = t.c + 0.5;
+    const ty = t.r + 0.5;
+    const dc = t.c - f.c;
+    const dr = t.r - f.r;
+    const isKnight = (Math.abs(dc) === 1 && Math.abs(dr) === 2) || (Math.abs(dc) === 2 && Math.abs(dr) === 1);
+    const corner = isKnight ? (Math.abs(dr) > Math.abs(dc) ? { x: fx, y: ty } : { x: tx, y: fy }) : null;
+    const ax = corner ? corner.x : fx;
+    const ay = corner ? corner.y : fy;
+    const lx = tx - ax;
+    const ly = ty - ay;
+    const llen = Math.hypot(lx, ly) || 1;
+    const ux = lx / llen;
+    const uy = ly / llen;
+    const endX = tx - ux * HEAD_LEN;
+    const endY = ty - uy * HEAD_LEN;
+    let startX = fx;
+    let startY = fy;
+    if (!corner) {
+      startX = fx + ux * START_GAP;
+      startY = fy + uy * START_GAP;
+    } else {
+      const sx = corner.x - fx;
+      const sy = corner.y - fy;
+      const slen = Math.hypot(sx, sy) || 1;
+      startX = fx + (sx / slen) * START_GAP;
+      startY = fy + (sy / slen) * START_GAP;
+    }
+    const points = corner
+      ? `${startX},${startY} ${corner.x},${corner.y} ${endX},${endY}`
+      : `${startX},${startY} ${endX},${endY}`;
+    const px = -uy;
+    const py = ux;
+    const head = [
+      `${tx},${ty}`,
+      `${endX + px * HEAD_HALF},${endY + py * HEAD_HALF}`,
+      `${endX - px * HEAD_HALF},${endY - py * HEAD_HALF}`,
+    ].join(" ");
+    return { points, head };
+  }
+
+  const badgeAt = badge ? viewOf(badge.square) : null;
 
   const rows = [0, 1, 2, 3, 4, 5, 6, 7];
   const order = flipped ? [...rows].reverse() : rows;
@@ -326,7 +382,7 @@ export default function Board({
       >
         {squares}
 
-        {(arrows.length > 0 || marks.length > 0) && (
+        {(arrows.length > 0 || marks.length > 0 || hints.length > 0) && (
           <svg className="annot" viewBox="0 0 8 8" aria-hidden="true">
             {marks.map((square) => {
               const { c, r } = viewOf(square);
@@ -341,71 +397,37 @@ export default function Board({
               );
             })}
 
+            {hints.map((h, i) => {
+              const shape = arrowShape(h);
+              return (
+                <g className={"annot-arrow is-hint is-" + h.tone} key={`h${i}`}>
+                  <polyline points={shape.points} />
+                  <polygon points={shape.head} />
+                </g>
+              );
+            })}
+
             {arrows.map((a, i) => {
-              const f = viewOf(a.from);
-              const t = viewOf(a.to);
-              const fx = f.c + 0.5;
-              const fy = f.r + 0.5;
-              const tx = t.c + 0.5;
-              const ty = t.r + 0.5;
-
-              const dc = t.c - f.c;
-              const dr = t.r - f.r;
-              const isKnight =
-                (Math.abs(dc) === 1 && Math.abs(dr) === 2) ||
-                (Math.abs(dc) === 2 && Math.abs(dr) === 1);
-
-              const corner = isKnight
-                ? Math.abs(dr) > Math.abs(dc)
-                  ? { x: fx, y: ty }
-                  : { x: tx, y: fy }
-                : null;
-
-              const ax = corner ? corner.x : fx;
-              const ay = corner ? corner.y : fy;
-              const lx = tx - ax;
-              const ly = ty - ay;
-              const llen = Math.hypot(lx, ly) || 1;
-              const ux = lx / llen;
-              const uy = ly / llen;
-
-              const endX = tx - ux * HEAD_LEN;
-              const endY = ty - uy * HEAD_LEN;
-
-              let startX = fx;
-              let startY = fy;
-              if (!corner) {
-                startX = fx + ux * START_GAP;
-                startY = fy + uy * START_GAP;
-              } else {
-                const sx = corner.x - fx;
-                const sy = corner.y - fy;
-                const slen = Math.hypot(sx, sy) || 1;
-                startX = fx + (sx / slen) * START_GAP;
-                startY = fy + (sy / slen) * START_GAP;
-              }
-
-              const points = corner
-                ? `${startX},${startY} ${corner.x},${corner.y} ${endX},${endY}`
-                : `${startX},${startY} ${endX},${endY}`;
-
-              const px = -uy;
-              const py = ux;
-
+              const shape = arrowShape(a);
               return (
                 <g className="annot-arrow" key={`a${i}`}>
-                  <polyline points={points} />
-                  <polygon
-                    points={[
-                      `${tx},${ty}`,
-                      `${endX + px * HEAD_HALF},${endY + py * HEAD_HALF}`,
-                      `${endX - px * HEAD_HALF},${endY - py * HEAD_HALF}`,
-                    ].join(" ")}
-                  />
+                  <polyline points={shape.points} />
+                  <polygon points={shape.head} />
                 </g>
               );
             })}
           </svg>
+        )}
+
+        {badge && badgeAt && (
+          <span
+            className={"review-badge tone-" + badge.tone}
+            style={{ left: `calc(var(--sq) * ${badgeAt.c + 1})`, top: `calc(var(--sq) * ${badgeAt.r})` }}
+            title={badge.label}
+            aria-label={badge.label}
+          >
+            {badge.mark}
+          </span>
         )}
 
         {pending && (
@@ -413,7 +435,7 @@ export default function Board({
             <button
               className="promo-veil"
               onClick={onCancelPromotion}
-              aria-label="Cancel promotion"
+              aria-label={t("Cancel promotion")}
             />
             <div
               className={"promo" + (dropDown ? " is-down" : " is-up")}
@@ -422,14 +444,14 @@ export default function Board({
                 top: `calc(var(--sq) * ${dropDown ? viewRow : viewRow - 3})`,
               }}
               role="group"
-              aria-label="Choose promotion piece"
+              aria-label={t("Choose promotion piece")}
             >
               {(["q", "r", "b", "n"] as PromotionPiece[]).map((type) => (
                 <button
                   key={type}
                   className="promo-pick"
                   onClick={() => onPromote?.(type)}
-                  aria-label={`Promote to ${NAMES[type]}`}
+                  aria-label={t("Promote to {v1}", { v1: NAMES[type] })}
                 >
                   <span
                     className={

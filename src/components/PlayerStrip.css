@@ -1,11 +1,13 @@
 .strip {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 11px;
   padding: 9px 13px;
-  border-radius: 10px;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card-fill);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 rgba(255, 244, 222, 0.045), 0 10px 28px rgba(0, 0, 0, 0.32);
 }
 
 .avatar {
@@ -14,11 +16,12 @@
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  font-family: "Instrument Serif", Georgia, serif;
-  font-size: 17px;
-  color: var(--muted);
+  background: radial-gradient(circle at 50% 30%, rgba(219, 186, 122, 0.14), var(--field) 75%);
+  border: 1px solid rgba(219, 186, 122, 0.28);
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--gold-hi);
   flex: none;
 }
 
@@ -74,15 +77,17 @@
   padding: 4px 13px;
   border-radius: 8px;
   color: var(--muted);
-  background: #0E0E0C;
-  border: 1px solid var(--line);
+  background: var(--field);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
   flex: none;
 }
 
 .clock.is-active {
-  color: var(--text);
-  background: var(--brass-soft);
-  border-color: rgba(184, 145, 79, 0.5);
+  color: #fff8ea;
+  background: linear-gradient(180deg, rgba(219, 186, 122, 0.2), rgba(219, 186, 122, 0.09));
+  border-color: rgba(219, 186, 122, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 240, 214, 0.1), 0 0 0 3px var(--ring);
 }
 
 .clock.is-low {
@@ -172,4 +177,14 @@
   .strip .admin-badge {
     padding: 0 3px;
   }
+}
+
+.who-rating {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(219, 186, 122, 0.16);
+  color: var(--brass);
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }

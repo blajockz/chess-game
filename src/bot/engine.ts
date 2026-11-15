@@ -2,11 +2,8 @@ import { UciEngine } from "./uci";
 
 export const ENGINE_URL = "/engine/stockfish-19-lite-single.js";
 
-let loading: Promise<UciEngine> | null = null;
-
-export function loadEngine(): Promise<UciEngine> {
-  if (loading) return loading;
-  loading = new Promise<UciEngine>((resolve, reject) => {
+function startEngine(): Promise<UciEngine> {
+  return new Promise<UciEngine>((resolve, reject) => {
     let worker: Worker;
     try {
       worker = new Worker(ENGINE_URL);
@@ -28,8 +25,26 @@ export function loadEngine(): Promise<UciEngine> {
     };
     engine.init().then(() => resolve(engine), reject);
   });
+}
+
+let loading: Promise<UciEngine> | null = null;
+
+export function loadEngine(): Promise<UciEngine> {
+  if (loading) return loading;
+  loading = startEngine();
   loading.catch(() => {
     loading = null;
   });
   return loading;
+}
+
+let reviewing: Promise<UciEngine> | null = null;
+
+export function loadReviewEngine(): Promise<UciEngine> {
+  if (reviewing) return reviewing;
+  reviewing = startEngine();
+  reviewing.catch(() => {
+    reviewing = null;
+  });
+  return reviewing;
 }

@@ -26,7 +26,7 @@ export function sendBanPage(req: IncomingMessage, res: ServerResponse, msLeft: n
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <meta http-equiv="refresh" content="${seconds + 2}">
-<title>Suspended · Tempo</title>
+<title>Suspended · Shatranj</title>
 <style nonce="${nonce}">
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -74,7 +74,7 @@ export function sendBanPage(req: IncomingMessage, res: ServerResponse, msLeft: n
   </div>
   <small>This page will reload by itself when the suspension ends.<br>
   If you share a network (school or office Wi-Fi), someone else on it may have caused this.</small>
-  <div class="brand">Tempo</div>
+  <div class="brand">Shatranj</div>
 </main>
 <script nonce="${nonce}">
   (function () {
@@ -105,11 +105,11 @@ export function sendBanPage(req: IncomingMessage, res: ServerResponse, msLeft: n
 const BLOCK_TEXT: Record<string, { title: string; text: string }> = {
   tor: {
     title: "Tor isn't allowed",
-    text: "Tempo can't be played through the Tor network. Open it in a normal browser to play.",
+    text: "Shatranj can't be played through the Tor network. Open it in a normal browser to play.",
   },
   vpn: {
     title: "VPN detected",
-    text: "Tempo can't be played through a VPN or proxy. Turn your VPN off, then reload this page.",
+    text: "Shatranj can't be played through a VPN or proxy. Turn your VPN off, then reload this page.",
   },
   datacenter: {
     title: "Connection not allowed",
@@ -117,7 +117,7 @@ const BLOCK_TEXT: Record<string, { title: string; text: string }> = {
   },
   unknown: {
     title: "We couldn't verify your connection",
-    text: "Your connection's address couldn't be read, so Tempo can't protect the game for you. Try again later, or from another network.",
+    text: "Your connection's address couldn't be read, so Shatranj can't protect the game for you. Try again later, or from another network.",
   },
 };
 
@@ -137,7 +137,7 @@ export function sendBlockPage(req: IncomingMessage, res: ServerResponse, reason:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>${title} · Tempo</title>
+<title>${title} · Shatranj</title>
 <style nonce="${nonce}">
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -173,7 +173,7 @@ export function sendBlockPage(req: IncomingMessage, res: ServerResponse, reason:
   <h1>${title}</h1>
   <p>${text}</p>
   <small>To keep games fair, every player must connect from their real address, so spam and cheating can be stopped.</small>
-  <div class="brand">Tempo</div>
+  <div class="brand">Shatranj</div>
 </main>
 </body>
 </html>`;

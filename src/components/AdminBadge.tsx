@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useId } from "react";
 import "./AdminBadge.css";
 
@@ -72,20 +73,20 @@ export function AdminCrest({ className = "ab-crest" }: { className?: string }) {
 
 export default function AdminBadge({ size = "md", label = true, tip = "up" }: Props) {
   return (
-    <span className={`admin-badge-wrap tip-${tip}`} tabIndex={0} aria-label="Admin: verified Tempo staff">
+    <span className={`admin-badge-wrap tip-${tip}`} tabIndex={0} aria-label={t("Admin: verified Shatranj staff")}>
       <span className={`admin-badge ab-${size}` + (label ? "" : " is-icon")} aria-hidden="true">
         <AdminCrest />
-        {label && <span className="ab-text">Admin</span>}
+        {label && <span className="ab-text">{t("Admin")}</span>}
       </span>
       <span className="ab-tip" role="tooltip">
         <span className="ab-tip-head">
           <AdminCrest className="ab-tip-crest" />
           <span>
-            <strong>Tempo Admin</strong>
-            <span className="ab-tip-sub">Verified staff account</span>
+            <strong>{t("Shatranj Admin")}</strong>
+            <span className="ab-tip-sub">{t("Verified staff account")}</span>
           </span>
         </span>
-        <span className="ab-tip-body">Keeps games fair and the community safe.</span>
+        <span className="ab-tip-body">{t("Keeps games fair and the community safe.")}</span>
       </span>
     </span>
   );

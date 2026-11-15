@@ -1,6 +1,9 @@
+import { t } from "../i18n";
 import "./GameSetup.css";
 import { useEffect, useRef, useState } from "react";
 import { DEFAULT_ELO, ELO_PRESETS, ELO_STEP, MAX_ELO, MIN_ELO, clampElo, levelName } from "../bot/strength";
+import CardGuide from "./CardGuide";
+import { CARD_IDS } from "../cards/cards";
 import {
   categoryOf,
   controlLabel,
@@ -18,6 +21,7 @@ export type SetupChoice = {
   cards?: boolean;
   opponent?: "bot" | "friend";
   elo?: number;
+  rated?: boolean;
 };
 
 const hasHandicap = (c: SetupChoice) =>
@@ -32,11 +36,11 @@ export function controlFor(choice: SetupChoice, you: "w" | "b"): TimeControl {
 }
 
 export function describeSetup(choice: SetupChoice) {
-  const category = categoryOf(controlFor(choice, "w"));
+  const category = t(categoryOf(controlFor(choice, "w")));
   const yours = controlLabel(choice.initial, choice.increment);
   if (!hasHandicap(choice)) return `${yours} ${category}`;
   const theirs = controlLabel(choice.opponentInitial!, choice.increment);
-  return `You ${yours} · Opp ${theirs} · ${category}`;
+  return t("You {yours} · Opp {theirs} · {category}", { yours, theirs, category });
 }
 
 const PRESETS: { category: Category; items: [number, number][] }[] = [
@@ -73,9 +77,12 @@ type Props = {
   onStart: (choice: SetupChoice) => void;
   onCancel: () => void;
   onOpponentChange?: (opponent: "bot" | "friend") => void;
+  centered?: boolean;
+  ratedBlocked?: string | null;
+  ratedLive?: boolean;
 };
 
-export default function GameSetup({ initial, onStart, onCancel, onOpponentChange }: Props) {
+export default function GameSetup({ initial, onStart, onCancel, onOpponentChange, centered, ratedBlocked = null, ratedLive }: Props) {
   const startKey = presetKey(initial);
   const [picked, setPicked] = useState<string>(startKey ?? "custom");
 
@@ -89,6 +96,8 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
   const [cards, setCards] = useState(initial.cards ?? false);
   const [opponent, setOpponent] = useState<"bot" | "friend">(initial.opponent ?? "bot");
   const [elo, setElo] = useState(clampElo(initial.elo ?? DEFAULT_ELO));
+  const [guide, setGuide] = useState(false);
+  const [rated, setRated] = useState(initial.rated ?? false);
 
   const startRef = useRef<HTMLButtonElement>(null);
 
@@ -127,25 +136,26 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
   const isBulletGame = categoryOf(controlFor(base, "w")) === "Bullet";
   const online = opponent === "friend";
   const cardsBlocked = isBulletGame;
-  const choice: SetupChoice = { ...base, opponent, cards: cards && !cardsBlocked, elo };
+  const choice: SetupChoice = { ...base, opponent, cards: cards && !cardsBlocked, elo, rated: rated && !ratedBlocked };
   const sideText =
-    side === "random" ? "random side" : side === "w" ? "you play White" : "you play Black";
+    side === "random" ? t("random side") : side === "w" ? t("you play White") : t("you play Black");
   const category = categoryOf(controlFor(choice, "w"));
   const yours = controlLabel(choice.initial, choice.increment);
   const headline = hasHandicap(choice)
-    ? `You ${yours} · Opponent ${controlLabel(choice.opponentInitial!, choice.increment)}`
-    : `${yours} ${category}`;
+    ? t("You {yours} · Opponent {controlLabel}", { yours, controlLabel: controlLabel(choice.opponentInitial!, choice.increment) })
+    : `${yours} ${t(category)}`;
   const subline =
-    (hasHandicap(choice) ? `${category} · ${sideText}` : sideText) +
-    (online ? "" : ` · bot ${elo}`) +
-    (choice.cards ? " · action cards" : "");
+    (hasHandicap(choice) ? `${t(category)} · ${sideText}` : sideText) +
+    (online ? "" : t(" · bot {elo}", { elo })) +
+    (choice.cards ? t(" · action cards") : "") +
+    (choice.rated ? t(" · rated") : "");
 
   return (
     <>
-      <div className="setup-scrim" onPointerDown={onCancel} aria-hidden="true" />
+      <div className={"setup-scrim" + (centered ? " is-centered" : "")} onPointerDown={onCancel} aria-hidden="true" />
       <aside
         id="game-panel"
-        className={"setup" + (online ? " is-online" : "")}
+        className={"setup" + (online ? " is-online" : "") + (centered ? " is-centered" : "")}
         role="dialog"
         aria-modal="false"
         aria-labelledby="setup-title"
@@ -153,25 +163,25 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
         <header className="setup-head">
           <div>
             <h2 className="setup-title" id="setup-title">
-              {online ? "Play a friend" : "New game"}
+              {online ? t("Play a friend") : t("New game")}
             </h2>
             <p className="setup-lead">
               {online
-                ? "Pick a time control, then send the link to your friend."
-                : "Pick a time control and the bot's strength."}
+                ? t("Pick a time control, then send the link to your friend.")
+                : t("Pick a time control and the bot's strength.")}
             </p>
           </div>
-          <button className="setup-close" onClick={onCancel} aria-label="Close the game panel" title="Close (Esc)">
+          <button className="setup-close" onClick={onCancel} aria-label={t("Close the game panel")} title={t("Close (Esc)")}>
             <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
               <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
           </button>
         </header>
 
-        <section className="setup-block" aria-label="Time control">
+        <section className="setup-block" aria-label={t("Time control")}>
           {PRESETS.map((group) => (
             <div className="preset-row" key={group.category}>
-              <span className="preset-cat">{group.category}</span>
+              <span className="preset-cat">{t(group.category)}</span>
               <div className="preset-chips">
                 {group.items.map(([m, inc]) => {
                   const k = keyOf(m, inc);
@@ -191,14 +201,14 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
           ))}
 
           <div className="preset-row">
-            <span className="preset-cat">Custom</span>
+            <span className="preset-cat">{t("Custom")}</span>
             <div className="preset-chips">
               <button
                 className={"chip-btn" + (picked === "custom" ? " is-on" : "")}
                 aria-pressed={picked === "custom"}
                 onClick={() => setPicked("custom")}
               >
-                Set your own
+                {t("Set your own")}
               </button>
             </div>
           </div>
@@ -207,7 +217,7 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
             <div className="custom">
               <div className="custom-fields">
                 <Stepper
-                  label={handicap ? "Your minutes" : "Minutes each"}
+                  label={handicap ? t("Your minutes") : t("Minutes each")}
                   value={minutes}
                   onDec={() => setMinutes((m) => stepMinutes(m, -1))}
                   onInc={() => setMinutes((m) => stepMinutes(m, 1))}
@@ -218,7 +228,7 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
                   step={0.5}
                 />
                 <Stepper
-                  label="Increment (s)"
+                  label={t("Increment (s)")}
                   value={increment}
                   onDec={() => setIncrement((s) => clampIncrement(s - 1))}
                   onInc={() => setIncrement((s) => clampIncrement(s + 1))}
@@ -240,14 +250,14 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
                   <span className="switch-knob" />
                 </button>
                 <span className="handicap-text">
-                  Give your opponent a different time
+                  {t("Give your opponent a different time")}
                 </span>
               </div>
 
               {handicap && (
                 <div className="custom-fields">
                   <Stepper
-                    label="Opponent minutes"
+                    label={t("Opponent minutes")}
                     value={opponentMinutes}
                     onDec={() => setOpponentMinutes((m) => stepMinutes(m, -1))}
                     onInc={() => setOpponentMinutes((m) => stepMinutes(m, 1))}
@@ -263,14 +273,14 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
           )}
         </section>
 
-        <section className="setup-block" aria-label="Opponent">
+        <section className="setup-block" aria-label={t("Opponent")}>
           <div className="side-row">
-            <span className="preset-cat">Opponent</span>
-            <div className="side-seg" role="group" aria-label="Opponent">
+            <span className="preset-cat">{t("Opponent")}</span>
+            <div className="side-seg" role="group" aria-label={t("Opponent")}>
               {(
                 [
-                  ["bot", "Tempo Bot"],
-                  ["friend", "A friend (link)"],
+                  ["bot", t("Shatranj Bot")],
+                  ["friend", t("A friend (link)")],
                 ] as ["bot" | "friend", string][]
               ).map(([value, text]) => (
                 <button
@@ -286,20 +296,47 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
           </div>
         </section>
 
+        <section className="setup-block" aria-label={t("Rated game")}>
+          <div className="side-row">
+            <span className="preset-cat">{t("Rated")}</span>
+            <div className="handicap">
+              <button
+                className={"switch" + (choice.rated ? " is-on" : "")}
+                role="switch"
+                aria-checked={!!choice.rated}
+                aria-label={t("Rated game")}
+                disabled={!!ratedBlocked}
+                onClick={() => setRated((r) => !r)}
+              >
+                <span className="switch-knob" />
+              </button>
+              <span className="handicap-text">
+                {ratedBlocked ??
+                  (choice.rated
+                    ? online
+                      ? t("Rated: counts if your friend has an account too")
+                      : t("Rated: your rating goes up or down")
+                    : t("Not rated: your rating doesn't change"))}
+              </span>
+            </div>
+          </div>
+          {ratedLive && <p className="rated-warning">{t("A rated game is in progress. Starting a new game counts it as a loss.")}</p>}
+        </section>
+
         {!online && (
-          <section className="setup-block bot-block" aria-label="Bot strength">
+          <section className="setup-block bot-block" aria-label={t("Bot strength")}>
             <div className="bot-head">
-              <span className="preset-cat">Bot rating</span>
+              <span className="preset-cat">{t("Bot rating")}</span>
               <span className="bot-elo">
                 <strong>{elo}</strong>
-                <span>{levelName(elo)}</span>
+                <span>{t(levelName(elo))}</span>
               </span>
             </div>
             <div className="bot-slider">
               <button
                 type="button"
                 className="stepper-btn"
-                aria-label="Lower the bot's rating"
+                aria-label={t("Lower the bot's rating")}
                 disabled={elo <= MIN_ELO}
                 onClick={() => setElo((e) => clampElo(e - ELO_STEP))}
               >
@@ -311,15 +348,15 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
                 max={MAX_ELO}
                 step={ELO_STEP}
                 value={elo}
-                aria-label="Bot rating"
-                aria-valuetext={`${elo}, ${levelName(elo)}`}
+                aria-label={t("Bot rating")}
+                aria-valuetext={`${elo}, ${t(levelName(elo))}`}
                 style={{ ["--fill" as string]: `${((elo - MIN_ELO) / (MAX_ELO - MIN_ELO)) * 100}%` }}
                 onChange={(e) => setElo(clampElo(Number(e.target.value)))}
               />
               <button
                 type="button"
                 className="stepper-btn"
-                aria-label="Raise the bot's rating"
+                aria-label={t("Raise the bot's rating")}
                 disabled={elo >= MAX_ELO}
                 onClick={() => setElo((e) => clampElo(e + ELO_STEP))}
               >
@@ -334,33 +371,28 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
                   aria-pressed={elo === p.elo}
                   onClick={() => setElo(p.elo)}
                 >
-                  {p.name} <span className="bot-chip-elo">{p.elo}</span>
+                  {t(p.name)} <span className="bot-chip-elo">{p.elo}</span>
                 </button>
               ))}
             </div>
             <p className="bot-credit">
-              Plays like a human of this rating, cards included. Powered by{" "}
-              <a href="https://github.com/official-stockfish/Stockfish" target="_blank" rel="noreferrer">
-                Stockfish
-              </a>{" "}
-              (GPL-3.0,{" "}
-              <a href="https://github.com/nmrugg/stockfish.js" target="_blank" rel="noreferrer">
-                source
+              {t("Plays like a human of this rating, cards included.")}{" "}
+              <a href="/licenses.txt" target="_blank" rel="noreferrer">
+                {t("Open-source licences")}
               </a>
-              ).
             </p>
           </section>
         )}
 
-        <section className="setup-block" aria-label="Play as">
+        <section className="setup-block" aria-label={t("Play as")}>
           <div className="side-row">
-            <span className="preset-cat">Play as</span>
-            <div className="side-seg" role="group" aria-label="Play as">
+            <span className="preset-cat">{t("Play as")}</span>
+            <div className="side-seg" role="group" aria-label={t("Play as")}>
               {(
                 [
-                  ["w", "White"],
-                  ["random", "Random"],
-                  ["b", "Black"],
+                  ["w", t("White")],
+                  ["random", t("Random")],
+                  ["b", t("Black")],
                 ] as [SideChoice, string][]
               ).map(([value, text]) => (
                 <button
@@ -379,25 +411,28 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
           </div>
         </section>
 
-        <section className="setup-block" aria-label="Action cards">
+        <section className="setup-block" aria-label={t("Action cards")}>
           <div className="side-row">
-            <span className="preset-cat">Cards</span>
+            <span className="preset-cat">{t("Cards")}</span>
             <div className="handicap">
               <button
                 className={"switch" + (choice.cards ? " is-on" : "")}
                 role="switch"
                 aria-checked={!!choice.cards}
-                aria-label="Action cards"
+                aria-label={t("Action cards")}
                 disabled={cardsBlocked}
                 onClick={() => setCards((c) => !c)}
               >
                 <span className="switch-knob" />
               </button>
               <span className="handicap-text">
-                {isBulletGame ? "Action cards are not available in Bullet" : "Play with action cards"}
+                {isBulletGame ? t("Action cards are not available in Bullet") : t("Play with action cards")}
               </span>
             </div>
           </div>
+          <button className="cards-guide-link" onClick={() => setGuide(true)}>
+            {t("What are action cards?")}
+          </button>
         </section>
 
         <footer className="setup-foot">
@@ -407,7 +442,7 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
           </p>
           <div className="setup-actions">
             <button className="ghost-btn" onClick={onCancel}>
-              Cancel
+              {t("Cancel")}
             </button>
             <button
               ref={startRef}
@@ -415,11 +450,12 @@ export default function GameSetup({ initial, onStart, onCancel, onOpponentChange
               data-category={category}
               onClick={() => onStart(choice)}
             >
-              {online ? "Create link" : "Start game"}
+              {online ? t("Create link") : t("Start game")}
             </button>
           </div>
         </footer>
       </aside>
+      {guide && <CardGuide cards={CARD_IDS} category={category} onClose={() => setGuide(false)} />}
     </>
   );
 }
@@ -446,7 +482,7 @@ function Stepper({ label, value, min, max, step, onDec, onInc, onType, onBlur }:
           className="stepper-btn"
           onClick={onDec}
           disabled={value <= min}
-          aria-label={`Decrease ${label}`}
+          aria-label={t("Decrease {label}", { label })}
         >
           −
         </button>
@@ -469,7 +505,7 @@ function Stepper({ label, value, min, max, step, onDec, onInc, onType, onBlur }:
           className="stepper-btn"
           onClick={onInc}
           disabled={value >= max}
-          aria-label={`Increase ${label}`}
+          aria-label={t("Increase {label}", { label })}
         >
           +
         </button>

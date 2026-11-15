@@ -7,30 +7,55 @@
   justify-content: center;
   gap: 18px;
   padding: 24px 16px;
-  background: radial-gradient(1000px 500px at 50% -10%, rgba(184, 145, 79, 0.1), transparent 60%), var(--ink);
+  background:
+    radial-gradient(520px 460px at 50% 48%, rgba(166, 110, 50, 0.14), transparent 72%),
+    radial-gradient(1000px 500px at 50% -10%, rgba(184, 145, 79, 0.09), transparent 60%),
+    var(--ink);
 }
 
 .adm-brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-family: "Instrument Serif", Georgia, serif;
-  font-size: 22px;
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
   color: var(--brass);
+}
+
+.adm-brand span {
+  background: linear-gradient(180deg, var(--gold-hi), var(--brass) 55%, var(--gold-lo));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .adm-brand img {
   border-radius: 9px;
+  filter: var(--logo-glow);
 }
 
 .adm-card {
+  position: relative;
   display: grid;
   gap: 14px;
   padding: 26px 24px;
-  border-radius: 16px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  border-radius: 18px;
+  border: 1px solid var(--edge);
+  background: var(--card-fill);
+  box-shadow: inset 0 1px 0 rgba(255, 244, 222, 0.05), 0 0 0 1px rgba(0, 0, 0, 0.45), 0 40px 90px rgba(0, 0, 0, 0.55);
+}
+
+.adm-card::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 12%;
+  right: 12%;
+  height: 1px;
+  background: var(--sheen);
+  pointer-events: none;
 }
 
 .adm-narrow {
@@ -52,18 +77,21 @@
   min-width: 0;
   padding: 10px 11px;
   border-radius: 9px;
-  border: 1px solid var(--line);
-  background: var(--ink);
+  border: 1px solid rgba(255, 240, 214, 0.09);
+  background: var(--field);
   color: var(--text);
   font: inherit;
   font-size: 14px;
   line-height: 1.5;
   resize: vertical;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
 }
 
-.adm-compose textarea:focus {
-  outline: 2px solid var(--brass);
-  outline-offset: 1px;
+.adm-compose textarea:focus,
+.adm-field textarea:focus {
+  outline: none;
+  border-color: rgba(219, 186, 122, 0.62);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45), 0 0 0 3px var(--ring);
 }
 
 .adm-card-inner {
@@ -139,19 +167,22 @@
   min-width: 0;
   padding: 10px 11px;
   border-radius: 9px;
-  border: 1px solid var(--line);
-  background: var(--ink);
+  border: 1px solid rgba(255, 240, 214, 0.09);
+  background: var(--field);
   color: var(--text);
   font: inherit;
   font-size: 14px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .adm-field input:focus,
 .adm-filters input:focus,
 .adm-filters select:focus,
 .adm-field select:focus {
-  outline: 2px solid var(--brass);
-  outline-offset: 1px;
+  outline: none;
+  border-color: rgba(219, 186, 122, 0.62);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45), 0 0 0 3px var(--ring);
 }
 
 .adm-field input[readonly] {
@@ -163,21 +194,25 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 8px 13px;
-  border-radius: 9px;
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--text);
+  padding: 9px 14px;
+  border-radius: 10px;
+  border: 0;
+  background: var(--gold-fill);
+  color: var(--gold-ink);
+  box-shadow: var(--gold-shadow);
   font: inherit;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   text-decoration: none;
   cursor: pointer;
   white-space: nowrap;
+  transition: filter 0.12s ease, transform 0.12s ease;
 }
 
 .adm-btn:hover:not(:disabled) {
-  border-color: var(--brass);
+  filter: brightness(1.08);
+  transform: translateY(-1px);
 }
 
 .adm-btn:disabled {
@@ -186,17 +221,14 @@
 }
 
 .adm-primary {
-  padding: 11px 14px;
-  border: 0;
-  background: var(--brass);
-  color: #17140f;
-  font-size: 14.5px;
+  padding: 12px 14px;
+  font-size: 15px;
 }
 
 .adm-danger {
-  border-color: rgba(201, 69, 47, 0.6);
-  background: rgba(201, 69, 47, 0.18);
-  color: #f3b4a6;
+  background: var(--danger-fill);
+  color: #fff;
+  box-shadow: var(--danger-shadow);
 }
 
 .adm-link,
@@ -234,8 +266,9 @@
 }
 
 .adm-notice {
-  background: var(--brass-soft);
-  border: 1px solid rgba(184, 145, 79, 0.45);
+  background: linear-gradient(180deg, rgba(219, 186, 122, 0.11), rgba(219, 186, 122, 0.06));
+  border: 1px solid rgba(219, 186, 122, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 240, 214, 0.05);
 }
 
 .adm-row {
@@ -258,8 +291,10 @@
   align-items: center;
   gap: 10px 18px;
   padding: 10px 18px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
+  border-bottom: 1px solid var(--edge);
+  background: rgba(12, 11, 10, 0.88);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
 }
 
 .adm-tabs {
@@ -281,9 +316,15 @@
   cursor: pointer;
 }
 
+.adm-tabs button:hover:not(.is-on) {
+  color: var(--text);
+}
+
 .adm-tabs button.is-on {
-  background: var(--brass-soft);
-  color: var(--brass);
+  background: var(--gold-fill);
+  color: var(--gold-ink);
+  box-shadow: var(--gold-shadow);
+  font-weight: 700;
 }
 
 .adm-me {
@@ -428,24 +469,28 @@
 }
 
 .adm-mini {
-  padding: 3px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--text);
+  padding: 4px 9px;
+  border-radius: 7px;
+  border: 0;
+  background: var(--gold-fill);
+  color: var(--gold-ink);
+  box-shadow: inset 0 1px 0 rgba(255, 249, 232, 0.45), inset 0 -1px 0 rgba(90, 60, 20, 0.35);
   font: inherit;
   font-size: 11.5px;
+  font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
+  transition: filter 0.12s ease;
 }
 
 .adm-mini:hover {
-  border-color: var(--brass);
+  filter: brightness(1.08);
 }
 
 .adm-mini.is-danger {
-  color: #f3b4a6;
-  border-color: rgba(201, 69, 47, 0.5);
+  color: #fff;
+  background: var(--danger-fill);
+  box-shadow: inset 0 1px 0 rgba(255, 226, 216, 0.4), inset 0 -1px 0 rgba(80, 20, 10, 0.4);
 }
 
 .adm-pill {
@@ -520,4 +565,8 @@
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+}
+
+.adm-bad {
+  color: #ff8f7d;
 }

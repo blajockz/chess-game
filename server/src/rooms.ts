@@ -9,6 +9,7 @@ import {
   INVITE_TTL_MS,
   LAG_BUDGET,
   LAG_COMP_MAX_MS,
+  GAME_CODE_LENGTH,
   ROOM_ALPHABET,
   ROOM_LENGTH,
   type Control,
@@ -41,7 +42,7 @@ import { LIMITS } from "./limits.js";
 
 export type Peer = { send: (data: string) => void };
 
-export type SeatUser = { id: string; name: string; admin?: boolean } | null;
+export type SeatUser = { id: string; name: string; admin?: boolean; guest?: boolean; rating?: number | null } | null;
 type Seat = { token: string; peer: Peer | null; user: SeatUser };
 
 export type Room = {
@@ -58,13 +59,15 @@ export type Room = {
   turnSince: number | null;
   deadlineTimer: NodeJS.Timeout | null;
   emptySince: number | null;
-  invite: { key: string; expiresAt: number } | null;
+  invite: { key: string; expiresAt: number; code: string } | null;
   drawOffer: Side | null;
   drawBlockedUntil: { w: number; b: number };
   owner: string;
   moves: string[];
   cards: CardsState | null;
+  rated: boolean;
   timeline: TimelineEvent[];
+  clockTrail: number[];
   mods: { w: ClockMods; b: ClockMods };
   lag: { w: number | null; b: number | null };
   lagBudget: { w: number; b: number };
@@ -90,6 +93,7 @@ const MAX_INCREMENT = 30;
 
 export class Rooms {
   private rooms = new Map<string, Room>();
+  onFinish: ((room: Room) => void) | null = null;
 
   constructor(
     private now: () => number = () => Date.now(),
@@ -118,7 +122,7 @@ export class Rooms {
     }
   }
 
-  create(control: Control, side: Side | "random", peer: Peer, owner = "local", withCards = false, user: SeatUser = null) {
+  create(control: Control, side: Side | "random", peer: Peer, owner = "local", withCards = false, user: SeatUser = null, rated = false) {
     if (side !== "w" && side !== "b" && side !== "random") {
       throw new GameError("bad_message", "Pick White, Black or Random.");
     }
@@ -149,13 +153,15 @@ export class Rooms {
       turnSince: null,
       deadlineTimer: null,
       emptySince: null,
-      invite: { key: randomBytes(16).toString("hex"), expiresAt: this.now() + this.inviteTtl },
+      invite: { key: randomBytes(16).toString("hex"), expiresAt: this.now() + this.inviteTtl, code: this.newCode() },
       drawOffer: null,
       drawBlockedUntil: { w: 0, b: 0 },
       owner,
       moves: [],
       cards: withCards && categoryOf(clean) !== "Bullet" ? newCardsState(testHand() ?? dealHand(randomInt)) : null,
+      rated: rated && !!user && !user.guest,
       timeline: [],
+      clockTrail: [],
       mods: { w: { ...NO_MODS }, b: { ...NO_MODS } },
       lag: { w: null, b: null },
       lagBudget: { w: LAG_BUDGET.start, b: LAG_BUDGET.start },
@@ -314,6 +320,7 @@ export class Rooms {
 
     room.moves.push(played.san);
     room.clock[side] += room.control.increment * 1000;
+    room.clockTrail.push(Math.round(room.clock[side]));
     room.mods[side] = { ...NO_MODS };
 
     if (room.cards) {
@@ -446,7 +453,7 @@ export class Rooms {
     c.charge[side] -= def.cost;
     c.used[side] = [...c.used[side], card];
     c.lastPlayed[side] = ply;
-    c.log = [...c.log, { ply, side, card, squares, message }];
+    c.log = [...c.log, { ply, side, card, picks: [...picks], squares, message }];
     return { card, side, squares, message };
   }
 
@@ -456,6 +463,7 @@ export class Rooms {
   }
 
   finish(room: Room, result: string) {
+    const wasOver = room.status === "over";
     room.drawOffer = null;
     if (room.turnStartedAt !== null && room.status === "playing") {
       room.clock = this.liveClock(room);
@@ -467,6 +475,18 @@ export class Rooms {
     if (room.deadlineTimer) clearTimeout(room.deadlineTimer);
     room.deadlineTimer = null;
     room.flagTimer = null;
+    if (!wasOver) {
+      try {
+        this.onFinish?.(room);
+      } catch (err) {
+        console.warn("After the game:", (err as Error).message);
+      }
+    }
+  }
+
+  isRated(room: Room) {
+    if (!room.rated) return false;
+    return (["w", "b"] as Side[]).every((s) => !room.seats[s] || (!!room.seats[s]!.user && !room.seats[s]!.user!.guest));
   }
 
   state(room: Room): GameState {
@@ -490,12 +510,38 @@ export class Rooms {
       timeline: room.cards ? [...room.timeline] : [],
       mods: this.liveMods(room),
       lag: { ...room.lag },
+      rated: this.isRated(room),
+      ratings: { w: room.seats.w?.user?.rating ?? null, b: room.seats.b?.user?.rating ?? null },
     };
   }
 
   inviteFor(room: Room) {
     if (room.status !== "waiting" || !room.invite) return undefined;
-    return { key: room.invite.key, expiresIn: Math.max(0, room.invite.expiresAt - this.now()) };
+    return { key: room.invite.key, expiresIn: Math.max(0, room.invite.expiresAt - this.now()), code: room.invite.code };
+  }
+
+  private newCode() {
+    for (;;) {
+      let code = "";
+      for (let i = 0; i < GAME_CODE_LENGTH; i++) code += ROOM_ALPHABET[randomInt(ROOM_ALPHABET.length)];
+      if (!this.byCode(code)) return code;
+    }
+  }
+
+  private byCode(code: string) {
+    for (const room of this.rooms.values()) {
+      if (room.status === "waiting" && room.invite && sameSecret(room.invite.code, code)) return room;
+    }
+    return undefined;
+  }
+
+  joinByCode(code: string, peer: Peer, user: SeatUser = null) {
+    const clean = String(code ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const room = clean.length === GAME_CODE_LENGTH ? this.byCode(clean) : undefined;
+    if (!room || !room.invite || this.now() > room.invite.expiresAt) {
+      throw new GameError("bad_code", "No game is waiting with this code. Check it, or ask for a new one.");
+    }
+    return this.join(room.id, undefined, peer, false, room.invite.key, user);
   }
 
   expireInvites() {

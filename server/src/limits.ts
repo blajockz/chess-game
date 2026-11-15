@@ -42,6 +42,7 @@ export const LIMITS = {
   messages: { capacity: 20, perSecond: 10 },
   creates: { capacity: 20, perSecond: 1 / 3 },
   joins: { capacity: 30, perSecond: 1 / 2 },
+  codes: { capacity: 6, perSecond: 1 / 20 },
   strikesBeforeKick: 30,
   upgrades: { capacity: 60, perSecond: 2 },
   http: { capacity: 300, perSecond: 50 },

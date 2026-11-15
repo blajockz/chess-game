@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import "./GameSetup.css";
 import "./OnlineDialog.css";
 import { useEffect, useRef, useState } from "react";
@@ -6,7 +7,7 @@ type Props =
   | {
       mode: "invite";
       link: string;
-      code: string;
+      code: string | null;
       expiresAt: number;
       onCancel: () => void;
     }
@@ -26,6 +27,7 @@ function mmss(ms: number) {
 
 export default function OnlineDialog(props: Props) {
   const [copied, setCopied] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const mainRef = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(() => performance.now());
@@ -51,44 +53,58 @@ export default function OnlineDialog(props: Props) {
     window.setTimeout(() => setCopied(false), 1800);
   }
 
+  async function copyCode(code: string) {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCodeCopied(true);
+      window.setTimeout(() => setCodeCopied(false), 1800);
+    } catch {
+    }
+  }
+
   return (
     <div className="setup-backdrop">
       <div className="setup online" role="dialog" aria-modal="true" aria-labelledby="online-title">
         {props.mode === "invite" && (
           <>
             <h2 className="setup-title" id="online-title">
-              Invite a friend
+              {t("Invite a friend")}
             </h2>
             <p className="online-text">
-              Send this link to your friend. The game starts as soon as they open it.
+              {t("Send this link to your friend, or give them the game code: they type it in \"Join game\". The game starts as soon as they arrive.")}
             </p>
             <div className="online-link">
               <input
                 ref={inputRef}
                 readOnly
                 value={props.link}
-                aria-label="Game link"
+                aria-label={t("Game link")}
                 onFocus={(e) => e.currentTarget.select()}
               />
               <button ref={mainRef} className="start-btn" onClick={() => copy(props.link)}>
-                {copied ? "Copied" : "Copy"}
+                {copied ? t("Copied") : t("Copy")}
               </button>
             </div>
-            <p className="online-code">
-              Game code <strong>{props.code}</strong>
-            </p>
+            {props.code && (
+              <p className="online-code-row">
+                {t("Game code")} <strong>{props.code}</strong>
+                <button className="ghost-btn" type="button" onClick={() => void copyCode(props.code!)}>
+                  {codeCopied ? t("Copied") : t("Copy code")}
+                </button>
+              </p>
+            )}
             <p className="online-rules">
-              The link works for one person only, and expires in{" "}
+              {t("The link and the code work for one person only, and expire in")}{" "}
               <strong className="online-timer">{mmss(props.expiresAt - now)}</strong>.
             </p>
             <div className="online-wait" role="status">
               <span className="online-dot" aria-hidden="true" />
-              Waiting for your friend to join…
+              {t("Waiting for your friend to join…")}
             </div>
             <div className="setup-foot online-foot">
               <span />
               <button className="ghost-btn" onClick={props.onCancel}>
-                Cancel
+                {t("Cancel")}
               </button>
             </div>
           </>
@@ -97,16 +113,16 @@ export default function OnlineDialog(props: Props) {
         {props.mode === "joining" && (
           <>
             <h2 className="setup-title" id="online-title">
-              Joining game {props.code}
+              {t("Joining game")} {props.code}
             </h2>
             <div className="online-wait" role="status">
               <span className="online-dot" aria-hidden="true" />
-              Connecting to the game server…
+              {t("Connecting to the game server…")}
             </div>
             <div className="setup-foot online-foot">
               <span />
               <button ref={mainRef} className="ghost-btn" onClick={props.onCancel}>
-                Cancel
+                {t("Cancel")}
               </button>
             </div>
           </>
@@ -115,13 +131,13 @@ export default function OnlineDialog(props: Props) {
         {props.mode === "error" && (
           <>
             <h2 className="setup-title" id="online-title">
-              {props.title ?? "Couldn't join"}
+              {props.title ?? t("Couldn't join")}
             </h2>
             <p className="online-text">{props.message}</p>
             <div className="setup-foot online-foot">
               <span />
               <button ref={mainRef} className="start-btn" onClick={props.onNewGame}>
-                {props.actionLabel ?? "New game"}
+                {props.actionLabel ?? t("New game")}
               </button>
             </div>
           </>

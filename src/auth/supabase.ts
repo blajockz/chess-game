@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { createClient } from "@supabase/supabase-js";
 import { dropGuest, savedGuest } from "./guest";
 
@@ -108,11 +109,9 @@ export function confirmUrl() {
 
 export const LINK_MINUTES = Math.max(1, Math.round(Number(import.meta.env.VITE_EMAIL_LINK_MINUTES) || 60));
 
-export const RESEND_WAIT_S = 60;
-
 export function linkLifetime(minutes = LINK_MINUTES) {
-  if (minutes % 60 === 0) return minutes === 60 ? "1 hour" : `${minutes / 60} hours`;
-  return `${minutes} minutes`;
+  if (minutes % 60 === 0) return minutes === 60 ? t("1 hour") : t("{hours} hours", { hours: minutes / 60 });
+  return t("{minutes} minutes", { minutes });
 }
 
 const linkFailure = (() => {
@@ -144,29 +143,32 @@ export function takeLinkFailure() {
   linkTaken = true;
   if (!linkFailure) return "";
   if (linkFailure.code === "otp_expired" || /expired|invalid/i.test(linkFailure.description)) {
-    return `This email link has expired or was already used. Links work once, for ${linkLifetime()}. Ask for a new one below.`;
+    return t("This email link has expired or was already used. Links work once, for {linkLifetime}. Ask for a new one below.", { linkLifetime: linkLifetime() });
   }
-  return "This email link didn't work" + (linkFailure.description ? `: ${linkFailure.description.slice(0, 160)}` : ".") + " Ask for a new one below.";
+  return t("This email link didn't work") + (linkFailure.description ? `: ${linkFailure.description.slice(0, 160)}` : ".") + t(" Ask for a new one below.");
 }
 
 export function friendlyError(err: { message?: string; status?: number; code?: string } | null | undefined) {
   if (!err) return "";
   const m = (err.message ?? "").toLowerCase();
   const code = err.code ?? "";
-  if (code === "invalid_credentials" || m.includes("invalid login credentials")) return "Wrong email or password.";
+  if (code === "invalid_credentials" || m.includes("invalid login credentials")) return t("Wrong email or password.");
+  if (code === "captcha_failed" || m.includes("captcha")) {
+    return t("The security check failed or expired. Wait for it to finish, then try again.");
+  }
   if (code === "email_not_confirmed" || m.includes("email not confirmed")) {
-    return "Confirm your email first: open the link we sent you.";
+    return t("Confirm your email first: open the link we sent you.");
   }
   if (code === "user_already_exists" || m.includes("already registered")) {
-    return "An account already uses this email. Sign in instead.";
+    return t("An account already uses this email. Sign in instead.");
   }
-  if (code === "weak_password" || m.includes("password should")) return "Choose a stronger password (at least 8 characters, mixing letters and numbers).";
+  if (code === "weak_password" || m.includes("password should")) return t("Choose a stronger password (at least 8 characters, mixing letters and numbers).");
   if (code === "over_email_send_rate_limit" || m.includes("email rate limit")) {
-    return "Too many emails were sent. Wait a few minutes and try again.";
+    return t("Too many emails were sent. Wait a few minutes and try again.");
   }
-  if (err.status === 429 || code.includes("rate_limit")) return "Too many attempts. Wait a minute and try again.";
-  if (code === "user_banned" || m.includes("user is banned")) return "This account is suspended.";
-  if (code === "same_password") return "Choose a password different from your old one.";
-  if (m.includes("failed to fetch") || m.includes("network")) return "Can't reach the sign-in service. Check your internet.";
-  return err.message || "Something went wrong. Try again.";
+  if (err.status === 429 || code.includes("rate_limit")) return t("Too many attempts. Wait a minute and try again.");
+  if (code === "user_banned" || m.includes("user is banned")) return t("This account is suspended.");
+  if (code === "same_password") return t("Choose a password different from your old one.");
+  if (m.includes("failed to fetch") || m.includes("network")) return t("Can't reach the sign-in service. Check your internet.");
+  return err.message || t("Something went wrong. Try again.");
 }

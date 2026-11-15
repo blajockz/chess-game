@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import "./ThemePicker.css";
 import { useEffect, useRef, useState } from "react";
 import { THEMES, themeById, type Theme, type ThemeId } from "../theme/themes";
@@ -71,15 +72,15 @@ export default function ThemePicker({ theme, onChange }: Props) {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="true"
         aria-expanded={open}
-        title="Change theme"
+        title={t("Change theme")}
       >
         <Preview theme={current} small />
         <span className="theme-btn-name">{current.name}</span>
       </button>
 
       {open && (
-        <div className="theme-pop" role="group" aria-label="Themes">
-          <p className="theme-pop-title">Theme</p>
+        <div className="theme-pop" role="group" aria-label={t("Themes")}>
+          <p className="theme-pop-title">{t("Theme")}</p>
           <div className="theme-grid">
             {THEMES.map((t) => (
               <button

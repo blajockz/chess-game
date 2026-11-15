@@ -1,8 +1,9 @@
+import { t } from "../i18n";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { AUTH_OFF, cameFromConfirmation, hasLinkFailure, supabase, takeLinkFailure } from "./supabase";
 import { GuestProblem, becomeGuest, checkGuest, dropGuest, onGuestChange, savedGuest, type Ban, type GuestPass } from "./guest";
-import { banEnds } from "./banText.ts";
+import { banEnds } from "./banText";
 
 export type Role = "user" | "admin";
 
@@ -50,14 +51,14 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
-const TEST_ACCOUNT: Account = { id: "test", email: null, name: "You", role: "user", banned: null };
+const TEST_ACCOUNT: Account = { id: "test", email: null, name: t("You"), role: "user", banned: null };
 
 export function guestProblemText(p: GuestProblem) {
   let text = p.message;
   if (p.code === "ip_banned" && p.until) {
     const ban: Ban = { until: p.until, reason: p.reason, since: p.since };
-    text = text.replace(/\.$/, "") + " " + banEnds(ban) + ". You can still sign in with an account.";
-    text += ` Reason: ${p.reason || "none given"}.`;
+    text = text.replace(/\.$/, "") + " " + t("{ends}. You can still sign in with an account.", { ends: banEnds(ban) });
+    text += t(" Reason: {v1}.", { v1: p.reason || "none given" });
   }
   return text;
 }
@@ -86,7 +87,7 @@ function deviceBan(): Ban | null {
 function deviceBanProblem(ban: Ban) {
   return new GuestProblem(
     "device_banned",
-    `An account on this device is suspended ${banEnds(ban)}, so guest play is off here until then. You can sign in with another account.`
+    t("An account on this device is suspended {banEnds}, so guest play is off here until then. You can sign in with another account.", { banEnds: banEnds(ban) })
   );
 }
 
@@ -96,7 +97,7 @@ function guestAccount(pass: GuestPass, banned: Account["banned"] = null): Accoun
 
 function fallbackName(session: Session) {
   const meta = session.user.user_metadata ?? {};
-  const name = meta.display_name || meta.full_name || meta.name || session.user.email?.split("@")[0] || "Player";
+  const name = meta.display_name || meta.full_name || meta.name || session.user.email?.split("@")[0] || t("Player");
   return String(name).slice(0, 24);
 }
 
@@ -127,7 +128,7 @@ async function loadAccount(session: Session): Promise<Account> {
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`no answer after ${ms / 1000} s`)), ms);
+    const timer = setTimeout(() => reject(new Error(t("no answer after {v1} s", { v1: ms / 1000 }))), ms);
     promise.then(
       (v) => {
         clearTimeout(timer);
@@ -189,7 +190,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (alive) setGuestError("");
         } catch (err) {
           if (alive) {
-            setGuestError(err instanceof GuestProblem ? guestProblemText(err) : "Couldn't start a guest game. Try again.");
+            setGuestError(err instanceof GuestProblem ? guestProblemText(err) : t("Couldn't start a guest game. Try again."));
             setAccount(null);
             setStatus("signed_out");
           }
@@ -247,13 +248,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         held.current += 1;
         await supabase!.auth.signOut({ scope: "local" }).catch(() => undefined);
         held.current -= 1;
-        if (alive) setPrompt({ tone: "notice", text: "Your email is confirmed. Sign in to start playing.", email: session.user.email ?? "" });
+        if (alive) setPrompt({ tone: "notice", text: t("Your email is confirmed. Sign in to start playing."), email: session.user.email ?? "" });
         await applyGuest();
         return;
       }
       if (!session && confirming) {
         confirming = false;
-        if (alive) setPrompt({ tone: "notice", text: "Your email is confirmed. Sign in to start playing." });
+        if (alive) setPrompt({ tone: "notice", text: t("Your email is confirmed. Sign in to start playing.") });
       }
       if (!session || (held.current > 0 && !recovery)) {
         await applyGuest();
