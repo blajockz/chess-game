@@ -49,4 +49,31 @@
 .btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
 .icon-btn { display: grid; place-items: center; width: 34px; height: 34px; font-size: 15px; border-radius: 9px; background: var(--gold-fill); border: 0; box-shadow: var(--gold-shadow); transition: filter 0.12s ease, transform 0.12s ease; }
 .icon-btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
-@media (max-width: 720px) { .chip { display: none; } .topbar { padding: 0 14px; } .modes, .actions .btn { display: none; } }
+@media (max-width: 720px) {
+  .topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    grid-template-areas:
+      "id theme sound new"
+      "modes modes chip chip";
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 8px;
+    height: auto;
+    padding: 9px 12px 10px;
+  }
+  .identity { grid-area: id; min-width: 0; gap: 8px; }
+  .mark { width: 30px; height: 30px; border-radius: 8px; }
+  .wordmark { font-size: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .actions { display: contents; }
+  .actions .theme-picker { grid-area: theme; }
+  .actions .icon-btn { grid-area: sound; }
+  .actions .btn { grid-area: new; padding: 8px 12px; font-size: 12.5px; white-space: nowrap; }
+  .modes { grid-area: modes; justify-self: start; }
+  .mode { padding: 6px 12px; font-size: 12.5px; white-space: nowrap; }
+  .chip { grid-area: chip; justify-self: end; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+@media (max-width: 360px) {
+  .wordmark { display: none; }
+  .mode { padding: 6px 10px; font-size: 12px; }
+}
