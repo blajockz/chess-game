@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import "./theme/themes.css";
 import TopBar from "./components/TopBar";
@@ -28,16 +29,29 @@ import {
   type TimeControl,
 } from "./game/useClocks";
 import OnlineDialog from "./components/OnlineDialog";
+import JoinDialog from "./components/JoinDialog";
 import AuthScreen from "./auth/AuthScreen";
 import { AuthProvider, useAuth, type Account } from "./auth/AuthProvider";
 import { usePresence } from "./net/usePresence";
 import Suspended from "./auth/Suspended";
 import { useBot } from "./bot/useBot";
 import { clampElo, DEFAULT_ELO, levelName } from "./bot/strength";
+import GameSummary from "./review/GameSummary";
+import { stepsFromMoves, winnerOf, worthKeeping, type GameRecord } from "./review/record";
+import { saveGame } from "./review/history";
+import { useRating } from "./rating/useRating";
+import { ratingApi, ratingOfLevel, type Change } from "./rating/api";
+import LevelDialog from "./rating/LevelDialog";
+
+const ReviewView = lazy(() => import("./review/ReviewView"));
+const HistoryPage = lazy(() => import("./review/HistoryPage"));
+const HISTORY = typeof location !== "undefined" && /^\/history(\/|$)/.test(location.pathname);
 
 const AdminApp = lazy(() => import("./admin/AdminApp"));
 const ADMIN = typeof location !== "undefined" && /^\/admin(\/|$)/.test(location.pathname);
 const PuzzlesPage = lazy(() => import("./puzzles/PuzzlesPage"));
+const SettingsPage = lazy(() => import("./account/SettingsPage"));
+const SETTINGS = typeof location !== "undefined" && /^\/settings(\/|$)/.test(location.pathname);
 const PUZZLES = typeof location !== "undefined" && /^\/puzzles(\/|$)/.test(location.pathname);
 import ConnectionOverlay from "./components/ConnectionOverlay";
 import { inviteLink, linkFromUrl, useOnline } from "./net/useOnline";
@@ -69,9 +83,9 @@ const RESIGN_LOCK_MS = 60_000;
 type Side = "w" | "b";
 
 function reviewLabel(ply: number, san: string | undefined) {
-  if (ply === 0 || !san) return "Start position";
+  if (ply === 0 || !san) return t("Start position");
   const number = Math.ceil(ply / 2);
-  return `After ${number}${ply % 2 === 1 ? "." : "…"} ${san}`;
+  return t("After {move}", { move: `${number}${ply % 2 === 1 ? "." : "…"} ${san}` });
 }
 
 export default function App() {
@@ -138,14 +152,14 @@ function Gate() {
   const banned = auth.account?.banned ?? null;
   const guestNav = useGuestNavigation(auth.status === "signed_in" && auth.account?.guest === true && !banned && !ADMIN);
   usePresence(auth.status === "signed_in" && !banned ? (auth.account?.id ?? null) : null);
-  if (auth.status === "loading") return <div className="auth-loading">Loading…</div>;
+  if (auth.status === "loading") return <div className="auth-loading">{t("Loading…")}</div>;
   if (auth.status === "recovery") return <AuthScreen recovery />;
   if (auth.status !== "signed_in" || !auth.account) return <AuthScreen />;
   if (banned) return <Suspended ban={banned} guest={auth.account.guest === true} />;
   if (ADMIN && auth.account.guest) return <AuthScreen />;
   if (ADMIN) {
     return (
-      <Suspense fallback={<div className="auth-loading">Loading…</div>}>
+      <Suspense fallback={<div className="auth-loading">{t("Loading…")}</div>}>
         <AdminApp account={auth.account} />
       </Suspense>
     );
@@ -158,9 +172,23 @@ function Gate() {
     return <AuthScreen guest={{ name: auth.account.name, onContinue: toGame }} />;
   }
   const onSignOut = auth.account.guest ? guestNav.toAuth : () => void auth.signOut();
+  if (HISTORY) {
+    return (
+      <Suspense fallback={<div className="auth-loading">{t("Loading…")}</div>}>
+        <HistoryPage account={auth.account} onSignOut={onSignOut} />
+      </Suspense>
+    );
+  }
+  if (SETTINGS) {
+    return (
+      <Suspense fallback={<div className="auth-loading">{t("Loading…")}</div>}>
+        <SettingsPage account={auth.account} onSignOut={onSignOut} />
+      </Suspense>
+    );
+  }
   if (PUZZLES) {
     return (
-      <Suspense fallback={<div className="auth-loading">Loading…</div>}>
+      <Suspense fallback={<div className="auth-loading">{t("Loading…")}</div>}>
         <PuzzlesPage account={auth.account} onSignOut={onSignOut} />
       </Suspense>
     );
@@ -191,20 +219,35 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
     saveTheme(theme);
   }, [theme]);
 
-  const [joining, setJoining] = useState(linkFromUrl);
+  const [joining, setJoining] = useState<{ room: string; invite: string | null; byCode?: boolean } | null>(linkFromUrl);
   const joiningCode = joining?.room ?? null;
+  const [joinOpen, setJoinOpen] = useState(() => !linkFromUrl() && new URLSearchParams(window.location.search).has("join"));
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("join")) return;
+    url.searchParams.delete("join");
+    window.history.replaceState(null, "", url);
+  }, []);
+  function joinWithCode(code: string) {
+    setJoinOpen(false);
+    setSetupOpen(false);
+    setJoining({ room: code, invite: null, byCode: true });
+    online.joinCode(code);
+  }
   const [setupOpen, setSetupOpen] = useState(false);
   const [panel, setPanel] = useState<SidebarItem>("bot");
+  const [setupCentered, setSetupCentered] = useState(false);
   const swallowClick = useRef(false);
   const warmUp = useRef(() => {});
 
-  function openPanel(kind: SidebarItem) {
+  function openPanel(kind: SidebarItem, centered = false) {
     if (kind === "bot") warmUp.current();
-    if (setupOpen && panel === kind) {
+    if (setupOpen && panel === kind && setupCentered === centered) {
       setSetupOpen(false);
       return;
     }
     setPanel(kind);
+    setSetupCentered(centered);
     setSetupOpen(true);
   }
   const online = useOnline();
@@ -213,6 +256,13 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
   onlineRef.current = onlineMode;
   const serverState = online.room ? online.state : null;
   const [lastSetup, setLastSetup] = useState<SetupChoice>(DEFAULT_SETUP);
+  const isGuest = account.guest === true;
+  const rating = useRating(isGuest);
+  const [ticket, setTicket] = useState<string | null>(null);
+  const ticketRef = useRef<string | null>(null);
+  ticketRef.current = ticket;
+  const [ratingChange, setRatingChange] = useState<Change | null>(null);
+  const [ratedNote, setRatedNote] = useState<string | null>(null);
   const [control, setControl] = useState<TimeControl>(controlFor(DEFAULT_SETUP, "w"));
   const [you, setYou] = useState<Side>("w");
   const [started, setStarted] = useState(false);
@@ -372,14 +422,34 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
     setControl(controlFor(choice, side));
     setYou(side);
     setJoining(null);
-    if (choice.opponent === "friend") {
-      online.create(
-        controlFor(choice, side),
-        side,
-        Boolean(choice.cards) && !isBullet(controlFor(choice, side))
+    const withCards = Boolean(choice.cards) && !isBullet(controlFor(choice, side));
+    const leaving = ticketRef.current;
+    if (leaving && !(choice.rated && choice.opponent !== "friend")) {
+      void ratingApi.leave(leaving).then(
+        (r) => {
+          if (r.left) setRatedNote(t("You left a rated game: it counted as a loss ({delta}).", { delta: r.left.delta }));
+          void rating.refresh();
+        },
+        () => undefined
       );
-    } else if (onlineMode) {
-      online.leave();
+    }
+    setTicket(null);
+    setRatingChange(null);
+    setRatedNote(null);
+    if (choice.opponent === "friend") {
+      online.create(controlFor(choice, side), side, withCards, Boolean(choice.rated));
+    } else {
+      if (onlineMode) online.leave();
+      if (choice.rated) {
+        void ratingApi.start(clampElo(choice.elo ?? DEFAULT_ELO), withCards).then(
+          (s) => {
+            setTicket(s.ticket);
+            if (s.abandoned) setRatedNote(t("Your last rated game was left unfinished: it counted as a loss ({delta}).", { delta: s.abandoned.delta }));
+            void rating.refresh();
+          },
+          (err) => setRatedNote(t("This game isn't rated: {v1}", { v1: err instanceof Error ? err.message : "the server couldn't be reached." }))
+        );
+      }
     }
     cards.deal(
       choice.opponent !== "friend" && Boolean(choice.cards) && !isBullet(controlFor(choice, side))
@@ -423,14 +493,14 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
 
   useEffect(() => {
     if (onlineMode || !deadline || now < deadline.at) return;
-    const who = deadline.side === "w" ? "White" : "Black";
-    const winner = deadline.side === "w" ? "Black" : "White";
+    const who = deadline.side === "w" ? t("White") : t("Black");
+    const winner = deadline.side === "w" ? t("Black") : t("White");
     window.clearTimeout(drawTimer.current);
     game.clearPremove();
     setEnded(
       deadline.kind === "abort"
-        ? `Game aborted: ${who} didn't make a first move`
-        : `${winner} wins: ${who} didn't move for ${formatWait(IDLE_QUIET_MS + IDLE_WARNING_MS)}`
+        ? t("Game aborted: {who} didn't make a first move", { who })
+        : t("{winner} wins: {who} didn't move for {formatWait}", { winner, who, formatWait: formatWait(IDLE_QUIET_MS + IDLE_WARNING_MS) })
     );
   }, [now]);
 
@@ -441,14 +511,14 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
     deadlineInfo = {
       text:
         deadline.side === you
-          ? "Make your first move, or the game is aborted"
-          : "Waiting for your opponent's first move",
+          ? t("Make your first move, or the game is aborted")
+          : t("Waiting for your opponent's first move"),
       time: leftText,
       urgent: left <= 10_000,
     };
   } else if (deadline?.kind === "idle" && left <= IDLE_WARNING_MS) {
     deadlineInfo = {
-      text: deadline.side === you ? "Move now, or you lose the game" : "Your opponent must move",
+      text: deadline.side === you ? t("Move now, or you lose the game") : t("Your opponent must move"),
       time: leftText,
       urgent: left <= 10_000,
     };
@@ -474,7 +544,7 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
       return;
     }
     const loser: Side = player ?? game.turn;
-    setEnded(`${loser === "w" ? "Black" : "White"} wins by resignation`);
+    setEnded(t("{v1} wins by resignation", { v1: loser === "w" ? "Black" : "White" }));
     setDrawState("idle");
   }
 
@@ -487,7 +557,7 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
     }
 
     if (!PRACTICE_OPPONENT) {
-      setEnded("Draw by agreement");
+      setEnded(t("Draw by agreement"));
       return;
     }
 
@@ -500,7 +570,7 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
       if (overRef.current) return;
       if (botEdge < 0) {
         game.clearPremove();
-        setEnded("Draw by agreement");
+        setEnded(t("Draw by agreement"));
         setDrawState("idle");
       } else {
         setDrawState("declined");
@@ -534,29 +604,92 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
     gameEnded ??
     (clocks.flagged
       ? clocks.flagged === "w"
-        ? "Black wins on time"
-        : "White wins on time"
+        ? t("Black wins on time")
+        : t("White wins on time")
       : game.status);
   const edge = game.materialForWhite;
   const timeOf = (s: Side) => (s === "w" ? clocks.whiteLabel : clocks.blackLabel);
   const lowOf = (s: Side) => (s === "w" ? clocks.whiteLow : clocks.blackLow);
   const takenBy = (s: Side) => (s === "w" ? game.capturedByWhite : game.capturedByBlack);
   const edgeOf = (s: Side) => (s === "w" ? Math.max(0, edge) : Math.max(0, -edge));
-  const name = (s: Side) => (s === "w" ? "White" : "Black");
+  const name = (s: Side) => (s === "w" ? t("White") : t("Black"));
+
+  const opponentName = onlineMode ? serverState?.players?.[them] || t("Opponent") : t("Shatranj Bot · {botElo}", { botElo });
+  const myRating = (cards.on ? rating.ratings?.cards : rating.ratings?.chess) ?? null;
+  const ratedNow = onlineMode ? serverState?.rated === true : ticket !== null;
+  const finished = over && status !== null && worthKeeping(status, game.ply);
+  const [record, setRecord] = useState<GameRecord | null>(null);
+  useEffect(() => {
+    setRecord(build());
+    function build(): GameRecord | null {
+      if (!finished || !status) return null;
+      const winner = winnerOf(status)!;
+      return {
+        id: `local:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`,
+        kind: onlineMode ? "online" : "bot",
+        white: you === "w" ? account.name : opponentName,
+        black: you === "b" ? account.name : opponentName,
+        you,
+        result: status,
+        winner,
+        control: { ...control },
+        cards: cards.on,
+        steps: stepsFromMoves(game.verboseMoves),
+        endedAt: new Date().toISOString(),
+        botElo: onlineMode ? null : botElo,
+        plies: game.ply,
+        ...(cards.on ? { hand: [...cards.state.hand], cardLog: cards.log.map(({ message: _m, ...c }) => c) } : {}),
+        clocks: clocks.trail(),
+      };
+    }
+  }, [finished, game.gameId, online.room]);
+  useEffect(() => {
+    if (!over || finished || !ticketRef.current) return;
+    void ratingApi.leave(ticketRef.current).catch(() => undefined);
+    setTicket(null);
+  }, [over, finished]);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  useEffect(() => {
+    setSaved(null);
+    setReviewing(false);
+    if (!record) return;
+    let live = true;
+    const mine = ticketRef.current;
+    if (mine) setTicket(null);
+    void saveGame(record, account.guest === true, record.kind === "bot" ? mine : null).then((result) => {
+      if (!live) return;
+      setSaved(result.text);
+      if (result.rating) setRatingChange(result.rating);
+      if (mine) void rating.refresh();
+    });
+    if (record.kind === "online" && serverState?.rated && !isGuest) {
+      const before = myRating?.rating ?? null;
+      window.setTimeout(() => {
+        void rating.refresh().then((r) => {
+          const after = (cards.on ? r?.cards : r?.chess)?.rating ?? null;
+          if (live && before !== null && after !== null) setRatingChange({ before, after, delta: after - before });
+        });
+      }, 1200);
+    }
+    return () => {
+      live = false;
+    };
+  }, [record]);
 
   function opponentDetail() {
     if (!onlineMode) {
-      if (!PRACTICE_OPPONENT) return `${name(them)} · Hotseat`;
+      if (!PRACTICE_OPPONENT) return t("{name} · Hotseat", { name: name(them) });
       const state =
-        bot.status === "loading" ? " · Loading engine…" : bot.status === "unavailable" ? " · Engine unavailable" : "";
-      return `${name(them)} · ${levelName(botElo)}${state}`;
+        bot.status === "loading" ? t(" · Loading engine…") : bot.status === "unavailable" ? t(" · Engine unavailable") : "";
+      return `${name(them)} · ${t(levelName(botElo))}${state}`;
     }
-    if (!serverState || serverState.status === "waiting") return `${name(them)} · Waiting to join`;
-    return `${name(them)} · ${serverState.online[them] ? "Online" : "Disconnected"}`;
+    if (!serverState || serverState.status === "waiting") return t("{name} · Waiting to join", { name: name(them) });
+    return `${name(them)} · ${serverState.online[them] ? t("Online") : t("Disconnected")}`;
   }
 
   function youDetail() {
-    if (onlineMode && online.connection === "reconnecting") return `${name(you)} · Reconnecting…`;
+    if (onlineMode && online.connection === "reconnecting") return t("{name} · Reconnecting…", { name: name(you) });
     return name(you);
   }
 
@@ -576,6 +709,7 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
     "invite_expired",
     "invite_used",
     "bad_invite",
+    "bad_code",
     "rate_limited",
   ];
   const lostRoom = !!online.error && FATAL.includes(online.error.code) && !online.room;
@@ -591,12 +725,12 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
       return;
     }
     if (awaySince !== null && serverState?.online[them]) {
-      setBackNote({ text: "Your opponent is back", key: performance.now() });
+      setBackNote({ text: t("Your opponent is back"), key: performance.now() });
     }
     setAwaySince(null);
   }, [oppAway]);
   useEffect(() => {
-    if (online.recovered) setBackNote({ text: "Back online", key: performance.now() });
+    if (online.recovered) setBackNote({ text: t("Back online"), key: performance.now() });
   }, [online.recovered]);
   useEffect(() => {
     if (!backNote) return;
@@ -624,7 +758,7 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
   });
   const shown = review.position;
 
-  const cardAt = new Map(cards.log.map((l) => [l.ply, CARDS[l.card].name]));
+  const cardAt = new Map(cards.log.map((l) => [l.ply, t(CARDS[l.card].name)]));
   const moves = game.moves.map((m, i) => ({
     ...m,
     whiteCard: cardAt.get(i * 2),
@@ -633,11 +767,11 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
 
   const effects: string[] = [];
   for (const s of ["w", "b"] as Side[]) {
-    const who = s === you ? "Your" : "Opponent's";
-    if (cards.clocksEffect.fast(s)) effects.push(`${who} clock runs ×2`);
-    if (cards.clocksEffect.paused(s)) effects.push(`${who} clock is paused`);
+    const who = s === you ? t("Your") : t("Opponent's");
+    if (cards.clocksEffect.fast(s)) effects.push(t("{who} clock runs ×2", { who }));
+    if (cards.clocksEffect.paused(s)) effects.push(t("{who} clock is paused", { who }));
   }
-  if (cards.shieldSquare) effects.push(`Shield on ${cards.shieldSquare}`);
+  if (cards.shieldSquare) effects.push(t("Shield on {shieldSquare}", { shieldSquare: cards.shieldSquare }));
 
   const boardProps: BoardProps = shown
     ? {
@@ -686,158 +820,195 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
         onSoundToggle={() => setSoundOn((on) => !on)}
         control={
           onlineMode && serverState
-            ? `Online · ${describeControl(serverState.control)}`
-            : describeSetup(lastSetup)
+            ? t("Online · {describeControl}{v2}", { describeControl: describeControl(serverState.control), v2: serverState.rated ? t(" · Rated") : "" })
+            : describeSetup(lastSetup) + (ratedNow ? t(" · Rated") : "")
         }
-        onNewGame={() => openPanel("bot")}
+        onNewGame={() => openPanel("bot", true)}
         theme={theme}
         onThemeChange={setTheme}
       />
 
-      <Sidebar open={setupOpen ? panel : null} onOpen={openPanel} account={account} onSignOut={onSignOut} />
-
-      <main
-        className="table"
-        onPointerDownCapture={() => {
-          if (!setupOpen) return;
-          swallowClick.current = true;
+      <Sidebar
+        open={setupOpen ? panel : null}
+        onOpen={(kind) => {
+          setJoinOpen(false);
+          openPanel(kind);
+        }}
+        onJoin={() => {
           setSetupOpen(false);
+          setJoinOpen((o) => !o);
         }}
-        onClickCapture={(e) => {
-          if (!swallowClick.current) return;
-          swallowClick.current = false;
-          e.stopPropagation();
-          e.preventDefault();
-        }}
-      >
-        <section className="board-column">
-          <PlayerStrip
-            name={onlineMode ? serverState?.players?.[them] || "Opponent" : `Tempo Bot · ${botElo}`}
-            admin={onlineMode && serverState?.admins?.[them] === true}
-            badgeTip="down"
-            detail={opponentDetail()}
-            time={timeOf(them)}
-            active={clocks.running && game.turn === them}
-            low={lowOf(them)}
-            captured={takenBy(them)}
-            advantage={edgeOf(them)}
-            signal={
-              onlineMode && serverState && serverState.status !== "waiting"
-                ? serverState.online[them]
-                  ? serverState.lag[them]
-                  : "down"
-                : undefined
-            }
+        account={account}
+        onSignOut={onSignOut}
+      />
+
+      {reviewing && record ? (
+        <Suspense fallback={<div className="auth-loading">{t("Loading the review…")}</div>}>
+          <ReviewView
+            record={record}
+            mode={mode}
+            canThree={canThree}
+            onThreeFail={() => setMode("default")}
+            soundOn={soundOn}
+            onClose={() => setReviewing(false)}
+            closeLabel={t("Back to game")}
           />
+        </Suspense>
+      ) : (
+        <main
+          className="table"
+          onPointerDownCapture={() => {
+            if (!setupOpen) return;
+            swallowClick.current = true;
+            setSetupOpen(false);
+          }}
+          onClickCapture={(e) => {
+            if (!swallowClick.current) return;
+            swallowClick.current = false;
+            e.stopPropagation();
+            e.preventDefault();
+          }}
+        >
+          <section className="board-column">
+            <PlayerStrip
+              name={opponentName}
+              rating={onlineMode && serverState?.ratings?.[them] != null ? { value: serverState.ratings[them]! } : null}
+              admin={onlineMode && serverState?.admins?.[them] === true}
+              badgeTip="down"
+              detail={opponentDetail()}
+              time={timeOf(them)}
+              active={clocks.running && game.turn === them}
+              low={lowOf(them)}
+              captured={takenBy(them)}
+              advantage={edgeOf(them)}
+              signal={
+                onlineMode && serverState && serverState.status !== "waiting"
+                  ? serverState.online[them]
+                    ? serverState.lag[them]
+                    : "down"
+                  : undefined
+              }
+            />
 
-          <div className={"board-wrap" + (shown ? " is-reviewing" : "")}>
-            {mode === "sim" && canThree ? (
-              <Safe3D props={boardProps} fallback={<Board {...boardProps} />} onFail={() => setMode("default")} />
-            ) : (
-              <Board key={game.gameId} {...boardProps} />
-            )}
+            <div className={"board-wrap" + (shown ? " is-reviewing" : "")}>
+              {mode === "sim" && canThree ? (
+                <Safe3D props={boardProps} fallback={<Board {...boardProps} />} onFail={() => setMode("default")} />
+              ) : (
+                <Board key={game.gameId} {...boardProps} />
+              )}
 
-            {shown && (
-              <button className="review-banner" onClick={review.live}>
-                {reviewLabel(review.current, shown.move?.san)}
-                <span className="review-banner-live">Back to live ⏭</span>
-              </button>
-            )}
+              {shown && (
+                <button className="review-banner" onClick={review.live}>
+                  {reviewLabel(review.current, shown.move?.san)}
+                  <span className="review-banner-live">{t("Back to live ⏭")}</span>
+                </button>
+              )}
 
-            {connectionLost && (
-              <ConnectionOverlay offline={online.offline} retry={online.retryInfo} onRetry={online.retryNow} />
-            )}
+              {connectionLost && (
+                <ConnectionOverlay offline={online.offline} retry={online.retryInfo} onRetry={online.retryNow} />
+              )}
 
-            {!connectionLost && oppAway && (
-              <div className="conn-banner" role="status">
-                <span className="conn-dot" aria-hidden="true" />
-                Opponent disconnected · waiting for them <strong>{awayText}</strong>
-              </div>
-            )}
+              {!connectionLost && oppAway && (
+                <div className="conn-banner" role="status">
+                  <span className="conn-dot" aria-hidden="true" />
+                  {t("Opponent disconnected · waiting for them")} <strong>{awayText}</strong>
+                </div>
+              )}
 
-            {!connectionLost && !oppAway && backNote && (
-              <div className="conn-banner is-good" role="status" key={backNote.key}>
-                <span className="conn-dot" aria-hidden="true" />
-                {backNote.text}
-              </div>
-            )}
+              {!connectionLost && !oppAway && backNote && (
+                <div className="conn-banner is-good" role="status" key={backNote.key}>
+                  <span className="conn-dot" aria-hidden="true" />
+                  {backNote.text}
+                </div>
+              )}
 
-            {cards.reveal && (
-              <div className="card-reveal" key={cards.reveal.key}>
-                <span className="card-reveal-who">
-                  {cards.reveal.side === you ? "You played" : "Opponent played"}
-                </span>
-                <ActionCard card={cards.reveal.card} width={170} />
-              </div>
+              {cards.reveal && (
+                <div className="card-reveal" key={cards.reveal.key}>
+                  <span className="card-reveal-who">
+                    {cards.reveal.side === you ? t("You played") : t("Opponent played")}
+                  </span>
+                  <ActionCard card={cards.reveal.card} width={170} />
+                </div>
+              )}
+            </div>
+
+            <PlayerStrip
+              name={account.name}
+              rating={myRating ? { value: myRating.rating, provisional: myRating.provisional } : null}
+              admin={account.role === "admin"}
+              detail={youDetail()}
+              time={timeOf(you)}
+              active={clocks.running && game.turn === you}
+              low={lowOf(you)}
+              captured={takenBy(you)}
+              advantage={edgeOf(you)}
+              signal={onlineMode && online.room ? (online.connection === "open" ? online.rtt : "down") : undefined}
+            />
+          </section>
+
+          <div className="side-column">
+            <MovePanel
+              moves={moves}
+              status={status}
+              over={over}
+              drawState={drawToShow}
+              canOfferDraw={canOfferDraw}
+              resignLockedFor={resignLocked ? Math.ceil(resignLockMs / 1000) : 0}
+              onResign={resign}
+              onOfferDraw={offerDraw}
+              onNewGame={() => openPanel("bot", true)}
+              idle={!started && !onlineMode}
+              emptyText={
+                !started && !onlineMode
+                  ? t("Move a piece to start a {describeSetup} game against Shatranj Bot ({botElo}), or pick another game from the menu.", { describeSetup: describeSetup(lastSetup), botElo })
+                  : undefined
+              }
+              incomingDraw={incomingDraw}
+              onAcceptDraw={() => online.answerDraw(true)}
+              onDeclineDraw={() => online.answerDraw(false)}
+              review={review}
+              deadline={deadlineInfo}
+            />
+
+            {ratedNote && <p className="rated-note">{ratedNote}</p>}
+            {record && <GameSummary record={record} saved={saved} rating={ratingChange} onReview={() => setReviewing(true)} />}
+
+            {cards.on && (
+              <CardPanel
+                you={you}
+                hand={cards.hand}
+                used={cards.used}
+                charge={cards.charge}
+                category={categoryOf(control)}
+                whyNot={cards.whyNot}
+                targeting={cards.targeting}
+                note={cards.note}
+                effects={effects}
+                onPlay={cards.start}
+                onCancel={cards.cancel}
+              />
             )}
           </div>
-
-          <PlayerStrip
-            name={account.name}
-            admin={account.role === "admin"}
-            detail={youDetail()}
-            time={timeOf(you)}
-            active={clocks.running && game.turn === you}
-            low={lowOf(you)}
-            captured={takenBy(you)}
-            advantage={edgeOf(you)}
-            signal={onlineMode && online.room ? (online.connection === "open" ? online.rtt : "down") : undefined}
-          />
-        </section>
-
-        <div className="side-column">
-          <MovePanel
-            moves={moves}
-            status={status}
-            over={over}
-            drawState={drawToShow}
-            canOfferDraw={canOfferDraw}
-            resignLockedFor={resignLocked ? Math.ceil(resignLockMs / 1000) : 0}
-            onResign={resign}
-            onOfferDraw={offerDraw}
-            onNewGame={() => openPanel("bot")}
-            idle={!started && !onlineMode}
-            emptyText={
-              !started && !onlineMode
-                ? `Move a piece to start a ${describeSetup(lastSetup)} game against Tempo Bot (${botElo}), or pick another game from the menu.`
-                : undefined
-            }
-            incomingDraw={incomingDraw}
-            onAcceptDraw={() => online.answerDraw(true)}
-            onDeclineDraw={() => online.answerDraw(false)}
-            review={review}
-            deadline={deadlineInfo}
-          />
-
-          {cards.on && (
-            <CardPanel
-              you={you}
-              hand={cards.hand}
-              used={cards.used}
-              charge={cards.charge}
-              whyNot={cards.whyNot}
-              targeting={cards.targeting}
-              note={cards.note}
-              effects={effects}
-              onPlay={cards.start}
-              onCancel={cards.cancel}
-            />
-          )}
-        </div>
-      </main>
+        </main>
+      )}
 
       {!setupOpen && lostRoom && (
         <OnlineDialog
           mode="error"
           message={
             online.error!.code === "offline"
-              ? "Can't reach the game server. Make sure it's running (npm run dev in the server folder)."
+              ? t("Can't reach the game server. Make sure it's running (npm run dev in the server folder).")
               : online.error!.message
           }
-          title={ownLinkExpired ? "Link expired" : undefined}
-          actionLabel={ownLinkExpired ? "Create a new link" : undefined}
+          title={ownLinkExpired ? t("Link expired") : undefined}
+          actionLabel={ownLinkExpired ? t("Create a new link") : joining?.byCode ? t("Enter another code") : undefined}
           onNewGame={() => {
-            if (ownLinkExpired) {
+            if (joining?.byCode) {
+              online.leave();
+              online.clearError();
+              setJoining(null);
+              setJoinOpen(true);
+            } else if (ownLinkExpired) {
               online.clearError();
               startGame(lastSetup);
             } else {
@@ -851,10 +1022,12 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
         <OnlineDialog mode="joining" code={joiningCode} onCancel={backToSetup} />
       )}
 
+      {joinOpen && <JoinDialog onJoin={joinWithCode} onCancel={() => setJoinOpen(false)} />}
+
       {!setupOpen && online.room && online.invite && serverState?.status === "waiting" && (
         <OnlineDialog
           mode="invite"
-          code={online.room}
+          code={online.invite.code}
           link={inviteLink(online.room, online.invite.key)}
           expiresAt={online.invite.expiresAt}
           onCancel={backToSetup}
@@ -863,11 +1036,30 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
 
       {setupOpen && (
         <GameSetup
-          key={panel}
+          key={panel + (setupCentered ? "-c" : "")}
           initial={{ ...lastSetup, opponent: panel }}
           onStart={startGame}
           onCancel={() => setSetupOpen(false)}
           onOpponentChange={setPanel}
+          centered={setupCentered}
+          ratedBlocked={isGuest ? t("Sign in to play rated games") : !rating.level ? t("Choose your level first") : null}
+          ratedLive={ratedNow && started && !over}
+        />
+      )}
+
+      {rating.needsLevel && !joiningCode && (
+        <LevelDialog
+          guest={isGuest}
+          onChoose={async (level) => {
+            await rating.choose(level);
+            let chosen = false;
+            try {
+              chosen = localStorage.getItem("tempo.botElo") !== null;
+            } catch {
+              chosen = true;
+            }
+            if (!chosen) setLastSetup((s) => ({ ...s, elo: ratingOfLevel(level) }));
+          }}
         />
       )}
     </div>

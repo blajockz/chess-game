@@ -7,19 +7,28 @@
   align-items: center;
   gap: 8px;
   height: 34px;
-  padding: 0 11px 0 5px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--text);
+  padding: 0 12px 0 5px;
+  border-radius: 9px;
+  border: 0;
+  background: var(--gold-fill);
+  color: var(--gold-ink);
+  box-shadow: var(--gold-shadow);
   font-size: 12.5px;
-  font-weight: 500;
-  transition: border-color 0.15s ease;
+  font-weight: 700;
+  transition: filter 0.12s ease, transform 0.12s ease;
 }
 
 .theme-btn:hover,
 .theme-btn.is-open {
-  border-color: var(--brass);
+  filter: brightness(1.08);
+}
+
+.theme-btn:hover {
+  transform: translateY(-1px);
+}
+
+.theme-btn .theme-prev {
+  border-color: rgba(27, 21, 12, 0.35);
 }
 
 .theme-prev {
@@ -76,10 +85,11 @@
   z-index: 50;
   width: 330px;
   padding: 12px;
-  border-radius: 12px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  border-radius: 14px;
+  background: var(--card-fill);
+  background-color: var(--surface);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 rgba(255, 244, 222, 0.05), 0 0 0 1px rgba(0, 0, 0, 0.45), 0 24px 60px rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   animation: theme-pop-in 0.14s ease-out;
@@ -114,12 +124,13 @@
 }
 
 .theme-card:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 240, 214, 0.04);
 }
 
 .theme-card.is-on {
-  border-color: var(--brass);
-  background: var(--brass-soft);
+  border-color: rgba(219, 186, 122, 0.7);
+  background: linear-gradient(180deg, rgba(219, 186, 122, 0.15), rgba(219, 186, 122, 0.06));
+  box-shadow: inset 0 1px 0 rgba(255, 240, 214, 0.06), 0 0 0 3px var(--ring);
 }
 
 .theme-card-name {

@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 
 const SITE_KEY = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim() ?? "";
@@ -21,10 +22,10 @@ function loadTurnstile(): Promise<Turnstile> {
       const s = document.createElement("script");
       s.src = SCRIPT;
       s.async = true;
-      s.onload = () => (w.turnstile ? resolve(w.turnstile) : reject(new Error("Turnstile didn't start")));
+      s.onload = () => (w.turnstile ? resolve(w.turnstile) : reject(new Error(t("Turnstile didn't start"))));
       s.onerror = () => {
         loading = null;
-        reject(new Error("Turnstile couldn't load"));
+        reject(new Error(t("Turnstile couldn't load")));
       };
       document.head.appendChild(s);
     });
@@ -49,9 +50,9 @@ export default function Captcha({ onToken, round, action }: Props) {
     if (!CAPTCHA_ON) return;
     let alive = true;
     loadTurnstile()
-      .then((t) => {
+      .then((turnstile) => {
         if (!alive || !box.current) return;
-        widget.current = t.render(box.current, {
+        widget.current = turnstile.render(box.current, {
           sitekey: SITE_KEY,
           action,
           theme: "dark",
@@ -64,13 +65,13 @@ export default function Captcha({ onToken, round, action }: Props) {
           "timeout-callback": () => tell.current(null),
           "error-callback": () => {
             tell.current(null);
-            setProblem("The security check couldn't run. Reload the page, or turn off a blocker for challenges.cloudflare.com.");
+            setProblem(t("The security check couldn't run. Reload the page, or turn off a blocker for challenges.cloudflare.com."));
             return true;
           },
         });
       })
       .catch(() => {
-        if (alive) setProblem("The security check couldn't load. Check your connection and reload the page.");
+        if (alive) setProblem(t("The security check couldn't load. Check your connection and reload the page."));
       });
     return () => {
       alive = false;

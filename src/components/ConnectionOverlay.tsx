@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import "./ConnectionOverlay.css";
 import { useEffect, useState } from "react";
 
@@ -16,13 +17,13 @@ export default function ConnectionOverlay({ offline, retry, onRetry }: Props) {
 
   const wait = retry ? Math.max(0, Math.ceil((retry.at - now) / 1000)) : 0;
   const status = offline
-    ? "Waiting for your internet to come back…"
+    ? t("Waiting for your internet to come back…")
     : retry && wait > 0
-      ? `Attempt ${retry.attempt} · next try in ${wait} s`
-      : "Reconnecting…";
+      ? t("Attempt {attempt} · next try in {wait} s", { attempt: retry.attempt, wait })
+      : t("Reconnecting…");
 
   return (
-    <div className="conn-overlay" role="alertdialog" aria-live="assertive" aria-label="Connection lost">
+    <div className="conn-overlay" role="alertdialog" aria-live="assertive" aria-label={t("Connection lost")}>
       <div className="conn-box">
         <span className={"conn-icon" + (offline ? " is-offline" : "")} aria-hidden="true">
           <svg viewBox="0 0 24 24" width="26" height="26">
@@ -37,15 +38,15 @@ export default function ConnectionOverlay({ offline, retry, onRetry }: Props) {
             {offline && <path d="M4 4l16 16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />}
           </svg>
         </span>
-        <strong className="conn-title">{offline ? "You're offline" : "Connection lost"}</strong>
+        <strong className="conn-title">{offline ? t("You're offline") : t("Connection lost")}</strong>
         <span className="conn-status">
           {!offline && <span className="conn-spinner" aria-hidden="true" />}
           {status}
         </span>
-        <p className="conn-warn">Your clock keeps running on the server while you're away.</p>
+        <p className="conn-warn">{t("Your clock keeps running on the server while you're away.")}</p>
         {!offline && (
           <button className="conn-retry" onClick={onRetry}>
-            Retry now
+            {t("Retry now")}
           </button>
         )}
       </div>

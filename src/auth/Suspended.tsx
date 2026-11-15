@@ -1,11 +1,14 @@
+import { t } from "../i18n";
 import "./AuthScreen.css";
 import { useEffect, useState } from "react";
 import { useAuth } from "./AuthProvider";
 import type { Ban } from "./guest";
-import { banLength, endDate, isPermanent, span } from "./banText.ts";
+import { banLength, endDate, isPermanent, span } from "./banText";
+import { useAuthFonts } from "./authFonts";
 
 export default function Suspended({ ban, guest = false }: { ban: Ban; guest?: boolean }) {
   const { signOut } = useAuth();
+  useAuthFonts();
   const [now, setNow] = useState(() => Date.now());
   const forever = isPermanent(ban);
   useEffect(() => {
@@ -25,50 +28,50 @@ export default function Suspended({ ban, guest = false }: { ban: Ban; guest?: bo
             <path d="M5.7 5.7l12.6 12.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
           </svg>
         </div>
-        <p className="auth-brand">Tempo</p>
+        <p className="auth-brand">{t("Shatranj")}</p>
         <h1 className="auth-title">
-          {over ? "Your suspension has ended" : guest ? "Guest play suspended" : "Account suspended"}
+          {over ? t("Your suspension has ended") : guest ? t("Guest play suspended") : t("Account suspended")}
         </h1>
         <p className="auth-text">
           {over
-            ? "You can play again."
+            ? t("You can play again.")
             : guest
-              ? "An admin suspended guest play from your network."
-              : "An admin suspended this account. You can't play with it until the suspension ends."}
+              ? t("An admin suspended guest play from your network.")
+              : t("An admin suspended this account. You can't play with it until the suspension ends.")}
         </p>
         {!over && (
           <dl className={"auth-ban-facts" + (forever ? " is-forever" : "")}>
             <div>
-              <dt>Duration</dt>
-              <dd className={forever ? "is-forever" : ""}>{length ?? "Until the date below"}</dd>
+              <dt>{t("Duration")}</dt>
+              <dd className={forever ? "is-forever" : ""}>{length ?? t("Until the date below")}</dd>
             </div>
             {!forever && (
               <>
                 <div>
-                  <dt>Time left</dt>
+                  <dt>{t("Time left")}</dt>
                   <dd>{span(left)}</dd>
                 </div>
                 <div>
-                  <dt>Ends</dt>
+                  <dt>{t("Ends")}</dt>
                   <dd>{endDate(ban)}</dd>
                 </div>
               </>
             )}
             <div className="auth-ban-reason">
-              <dt>Reason</dt>
-              <dd>{ban.reason?.trim() || "No reason was given."}</dd>
+              <dt>{t("Reason")}</dt>
+              <dd>{ban.reason?.trim() || t("No reason was given.")}</dd>
             </div>
           </dl>
         )}
         {over ? (
           <button className="auth-submit" onClick={() => window.location.reload()}>
-            Continue
+            {t("Continue")}
           </button>
         ) : (
           <>
-            {guest && <p className="auth-text">You can still sign in with an account.</p>}
+            {guest && <p className="auth-text">{t("You can still sign in with an account.")}</p>}
             <button className="auth-submit" onClick={() => void signOut()}>
-              {guest ? "Sign in instead" : "Sign out"}
+              {guest ? t("Sign in instead") : t("Sign out")}
             </button>
           </>
         )}

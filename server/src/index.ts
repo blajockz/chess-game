@@ -27,6 +27,10 @@ import { AUTH_DISABLED, WS_PROTOCOL, bearer, verifyToken, wsGuestToken, wsToken,
 import { LOGS_ON, banEnd, logEvent, logPresence, origin, profileOf, touch } from "./logs.js";
 import { handleAdmin, setAdminHooks } from "./admin.js";
 import { handlePuzzles } from "./puzzles.js";
+import { handleGames, saveOnlineGame, sweepGameLimits } from "./games.js";
+import { handleRating, ratingFor, sweepRatingLimits } from "./ratings.js";
+import { handleAccount, sweepAccountLimits } from "./account.js";
+import { EmailLimitError, emailPermit, sweepEmailLimits } from "./emailLimit.js";
 import {
   GuestError,
   createGuest,
@@ -52,8 +56,31 @@ const rooms = new Rooms(undefined, INVITE_TTL, {
   window: Number(process.env.IDLE_WINDOW_MS) || IDLE_WINDOW_MS,
 });
 
+rooms.onFinish = (room) =>
+  void saveOnlineGame(room, rooms.isRated(room)).then((change) => {
+    if (!change) return;
+    for (const s of ["w", "b"] as Side[]) {
+      const user = room.seats[s]?.user;
+      if (user) user.rating = change[s].after;
+    }
+    broadcast(room);
+  });
+
+function showRating(room: Room, side: Side) {
+  const user = room.seats[side]?.user;
+  if (!user || user.guest || user.rating !== undefined) return;
+  user.rating = null;
+  void ratingFor(user.id, room.cards ? "cards" : "chess").then((rating) => {
+    const now = room.seats[side]?.user;
+    if (!now || now.id !== user.id || rating === null) return;
+    now.rating = rating;
+    broadcast(room);
+  });
+}
+
 const creates = new RateLimiter(LIMITS.creates.capacity, LIMITS.creates.perSecond);
 const joins = new RateLimiter(LIMITS.joins.capacity, LIMITS.joins.perSecond);
+const codes = new RateLimiter(LIMITS.codes.capacity, LIMITS.codes.perSecond);
 const upgrades = new RateLimiter(LIMITS.upgrades.capacity, LIMITS.upgrades.perSecond);
 const requests = new RateLimiter(LIMITS.http.capacity, LIMITS.http.perSecond);
 const requestWindow = new IpGuard(IP_WINDOW.maxRequests, IP_WINDOW.windowMs, IP_WINDOW.banMs);
@@ -178,7 +205,9 @@ function seatMessage(room: Room, side: Side, token: string): ServerMsg {
 }
 
 function seatUser(conn: Conn) {
-  return conn.player ? { id: conn.player.id, name: conn.player.name, admin: conn.player.admin === true } : null;
+  return conn.player
+    ? { id: conn.player.id, name: conn.player.name, admin: conn.player.admin === true, guest: conn.player.guest === true }
+    : null;
 }
 
 function slowDown(): never {
@@ -212,10 +241,12 @@ function handle(ws: WebSocket, conn: Conn, msg: ClientMsg) {
       ws,
       conn.player?.id ?? conn.ip,
       msg.cards === true,
-      seatUser(conn)
+      seatUser(conn),
+      msg.rated === true
     );
     where.set(ws, { room, side });
-    logEvent("game_create", conn.req, { userId: conn.player?.id, detail: { room: room.id, side, cards: msg.cards === true } });
+    showRating(room, side);
+    logEvent("game_create", conn.req, { userId: conn.player?.id, detail: { room: room.id, side, cards: msg.cards === true, rated: room.rated } });
     send(ws, seatMessage(room, side, token));
     return;
   }
@@ -233,6 +264,22 @@ function handle(ws: WebSocket, conn: Conn, msg: ClientMsg) {
     }
     where.set(ws, { room, side });
     room.lag[side] = rttOf(ws);
+    showRating(room, side);
+    if (!room.deadlineTimer) armDeadline(room);
+    send(ws, seatMessage(room, side, token));
+    broadcast(room);
+    return;
+  }
+
+  if (msg.t === "joinCode") {
+    if (!codes.take(conn.ip) || !joins.take(conn.ip)) slowDown();
+    requireWork(ws, conn, msg.pow);
+    leaveCurrent(ws);
+    const { room, side, token } = rooms.joinByCode(msg.code, ws, seatUser(conn));
+    logEvent("game_join", conn.req, { userId: conn.player?.id, detail: { room: room.id, side, by: "code" } });
+    where.set(ws, { room, side });
+    room.lag[side] = rttOf(ws);
+    showRating(room, side);
     if (!room.deadlineTimer) armDeadline(room);
     send(ws, seatMessage(room, side, token));
     broadcast(room);
@@ -350,6 +397,18 @@ const http = createServer(
       void handleAdmin(req, res, path);
       return;
     }
+    if (path === "/api/games" || path.startsWith("/api/games/")) {
+      void handleGames(req, res, path, (userId) => apiUser.set(req, userId));
+      return;
+    }
+    if (path === "/api/account" || path.startsWith("/api/account/")) {
+      void handleAccount(req, res, path, (userId) => apiUser.set(req, userId));
+      return;
+    }
+    if (path === "/api/rating" || path.startsWith("/api/rating/")) {
+      void handleRating(req, res, path, (userId) => apiUser.set(req, userId));
+      return;
+    }
     if (path.startsWith("/api/puzzles/")) {
       void handlePuzzles(req, res, path, (userId) => apiUser.set(req, userId));
       return;
@@ -362,7 +421,7 @@ const http = createServer(
       serveStatic(req, res);
       return;
     }
-    plain(req, res, 200, "Tempo game server. Connect with a WebSocket on /ws.");
+    plain(req, res, 200, "Shatranj game server. Connect with a WebSocket on /ws.");
   }
 );
 
@@ -412,6 +471,26 @@ async function readSmallJson(req: IncomingMessage, limit = 1024): Promise<Record
   throw new GuestError("bad_request", "Couldn't read the request.", 400);
 }
 
+async function emailPermitApi(req: IncomingMessage, res: import("node:http").ServerResponse) {
+  try {
+    if (req.method !== "POST") return json(req, res, 405, { error: "method_not_allowed" });
+    if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) {
+      return json(req, res, 415, { error: "bad_request", message: "Send JSON." });
+    }
+    const body = await readSmallJson(req);
+    json(req, res, 200, await emailPermit(req, clientIp(req), body.email, body.kind));
+  } catch (err) {
+    if (err instanceof EmailLimitError || err instanceof GuestError) {
+      const extra = err instanceof EmailLimitError ? err.extra : {};
+      res.writeHead(err.status, { ...securityHeaders(req), "content-type": "application/json", "cache-control": "no-store" });
+      res.end(JSON.stringify({ error: err.code, message: err.message, ...extra }));
+      return;
+    }
+    console.error(err);
+    if (!res.headersSent) json(req, res, 500, { error: "server_error" });
+  }
+}
+
 async function guestApi(req: IncomingMessage, res: import("node:http").ServerResponse) {
   const ip = clientIp(req);
   try {
@@ -439,6 +518,7 @@ async function guestApi(req: IncomingMessage, res: import("node:http").ServerRes
 async function api(req: IncomingMessage, res: import("node:http").ServerResponse, path: string) {
   try {
     if (path === "/api/guest") return await guestApi(req, res);
+    if (path === "/api/email-permit") return await emailPermitApi(req, res);
     if (path !== "/api/me") return json(req, res, 404, { error: "not_found" });
     if (req.method !== "GET") return json(req, res, 405, { error: "method_not_allowed" });
     const sent = bearer(req);
@@ -697,7 +777,7 @@ wss.on("connection", (ws: WebSocket, req) => {
       handle(ws, conn, msg);
     } catch (err) {
       if (err instanceof GameError) {
-        if (["bad_pow", "bad_invite", "no_room", "invite_used", "invite_expired", "rate_limited"].includes(err.code)) {
+        if (["bad_pow", "bad_invite", "bad_code", "no_room", "invite_used", "invite_expired", "rate_limited"].includes(err.code)) {
           logEvent(err.code === "bad_pow" ? "bad_pow" : "game_refused", conn.req, {
             userId: conn.player?.id,
             detail: { code: err.code, room: msg.t === "join" ? msg.room : undefined },
@@ -775,18 +855,23 @@ setInterval(
     rooms.sweep(ROOM_IDLE_MS);
     creates.sweep();
     joins.sweep();
+    codes.sweep();
     upgrades.sweep();
     requests.sweep();
     requestWindow.sweep();
     messageWindow.sweep();
     pow.sweep();
     sweepGuests();
+    sweepEmailLimits();
+    sweepGameLimits();
+    sweepRatingLimits();
+    sweepAccountLimits();
   }),
   60 * 1000
 ).unref();
 
 http.listen(PORT, () => {
-  console.log(`Tempo server running on http://localhost:${PORT} (WebSocket: ws://localhost:${PORT}/ws)`);
+  console.log(`Shatranj server running on http://localhost:${PORT} (WebSocket: ws://localhost:${PORT}/ws)`);
   console.log(SERVE_GAME ? `Serving the game from ${STATIC_DIR}` : "No build found: run npm run build to serve the game too.");
   console.log(AUTH_DISABLED ? "Accounts: OFF (test mode)" : "Accounts: on (Supabase)");
   console.log(LOGS_ON ? "Security logs: saved to Supabase" : "Security logs: off (SUPABASE_SECRET_KEY not set)");

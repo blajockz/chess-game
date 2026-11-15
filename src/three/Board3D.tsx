@@ -7,8 +7,9 @@ import { ToneMappingMode } from "postprocessing";
 import * as THREE from "three";
 import type { Square } from "chess.js";
 import type { BoardProps } from "../components/Board";
-import { BOARD_SIZE, SPECIES, boardMaps, plankMaps } from "./materials";
-import { TABLE_Y, at, emptyLedger, poses, reconcile } from "./tokens.ts";
+import { BOARD_SIZE, SPECIES, boardMaps, plankMaps, stainedWood } from "./materials";
+import { DEFAULT_THEME, THEMES, themeById, type Theme, type ThemeId } from "../theme/themes";
+import { TABLE_Y, at, emptyLedger, poses, reconcile } from "./tokens";
 import { Impacts, PieceToken } from "./Animated";
 
 type Quality = "high" | "low";
@@ -17,6 +18,22 @@ const FILES = "abcdefgh";
 
 const ALL_SQUARES: Square[] = [];
 for (let r = 8; r >= 1; r--) for (const f of FILES) ALL_SQUARES.push((f + r) as Square);
+
+function readTheme(): Theme {
+  const id = document.documentElement.dataset.theme;
+  return themeById(THEMES.some((t) => t.id === id) ? (id as ThemeId) : DEFAULT_THEME);
+}
+
+function useBoardTheme(): Theme {
+  const [theme, setTheme] = useState(readTheme);
+  useEffect(() => {
+    const watch = new MutationObserver(() => setTheme(readTheme()));
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    setTheme(readTheme());
+    return () => watch.disconnect();
+  }, []);
+  return theme;
+}
 
 function homeView(flipped: boolean) {
   const z = flipped ? -12.6 : 12.6;
@@ -100,8 +117,9 @@ function Table() {
   );
 }
 
-function ChessBoard() {
-  const { geometry, materials } = useMemo(() => {
+function ChessBoard({ wood }: { wood: [string, string] }) {
+  const [light, dark] = wood;
+  const geometry = useMemo(() => {
     const half = BOARD_SIZE / 2;
     const r = 0.12;
     const shape = new THREE.Shape();
@@ -129,22 +147,32 @@ function ChessBoard() {
     }
     g.rotateX(-Math.PI / 2);
     g.translate(0, -0.035 - 0.3, 0);
-    const top = boardMaps();
-    const side = plankMaps(SPECIES.rosewood, 9, 512);
-    return {
-      geometry: g,
-      materials: [
-        new THREE.MeshPhysicalMaterial({
-          ...top,
-          roughness: 0.55,
-          normalScale: new THREE.Vector2(0.35, 0.35),
-          clearcoat: 1,
-          clearcoatRoughness: 0.14,
-        }),
-        new THREE.MeshPhysicalMaterial({ ...side, roughness: 0.5, clearcoat: 0.8, clearcoatRoughness: 0.2 }),
-      ],
-    };
+    return g;
   }, []);
+  const side = useMemo(() => {
+    const m = plankMaps(SPECIES.rosewood, 9, 512);
+    return new THREE.MeshPhysicalMaterial({ ...m, roughness: 0.5, clearcoat: 0.8, clearcoatRoughness: 0.2 });
+  }, []);
+  const top = useMemo(() => {
+    const m = boardMaps(stainedWood(SPECIES.maple, light), stainedWood(SPECIES.walnut, dark));
+    return new THREE.MeshPhysicalMaterial({
+      ...m,
+      roughness: 0.55,
+      normalScale: new THREE.Vector2(0.35, 0.35),
+      clearcoat: 1,
+      clearcoatRoughness: 0.14,
+    });
+  }, [light, dark]);
+  useEffect(
+    () => () => {
+      top.map?.dispose();
+      top.roughnessMap?.dispose();
+      top.normalMap?.dispose();
+      top.dispose();
+    },
+    [top]
+  );
+  const materials = useMemo(() => [top, side], [top, side]);
   return <mesh geometry={geometry} material={materials} receiveShadow castShadow />;
 }
 
@@ -184,7 +212,7 @@ function HitAreas({ onPick }: { onPick: (sq: Square, e: ThreeEvent<MouseEvent>) 
   );
 }
 
-function Scene(props: BoardProps & { resetKey: number; quality: Quality }) {
+function Scene(props: BoardProps & { resetKey: number; quality: Quality; theme: Theme }) {
   const {
     board,
     selected,
@@ -201,6 +229,7 @@ function Scene(props: BoardProps & { resetKey: number; quality: Quality }) {
     shielded = null,
     resetKey,
     quality,
+    theme,
   } = props;
 
   const ledger = useRef(emptyLedger());
@@ -225,8 +254,8 @@ function Scene(props: BoardProps & { resetKey: number; quality: Quality }) {
 
   return (
     <>
-      <color attach="background" args={["#0f0b08"]} />
-      <fog attach="fog" args={["#0f0b08", 16, 34]} />
+      <color attach="background" args={[theme.room]} />
+      <fog attach="fog" args={[theme.room, 16, 34]} />
       <CameraRig flipped={flipped} resetKey={resetKey} />
       {import.meta.env.DEV && <DevProbe />}
 
@@ -271,7 +300,7 @@ function Scene(props: BoardProps & { resetKey: number; quality: Quality }) {
       </Environment>
 
       <Table />
-      <ChessBoard />
+      <ChessBoard wood={theme.wood} />
 
       {lastMove && (
         <>
@@ -338,6 +367,7 @@ function PhotoLook({ quality }: { quality: Quality }) {
 export default function Board3D(props: BoardProps) {
   const [resetKey, setResetKey] = useState(0);
   const [quality, setQuality] = useState<Quality>("high");
+  const theme = useBoardTheme();
   const { pending = null, onPromote, onCancelPromotion } = props;
   return (
     <div className="board3d" onDoubleClick={() => setResetKey((k) => k + 1)} title="Drag to turn around the board, scroll to zoom, double-click to reset">
@@ -350,7 +380,7 @@ export default function Board3D(props: BoardProps) {
       >
         <PerformanceMonitor onDecline={() => setQuality("low")} flipflops={2} />
         {quality === "high" && <SoftShadows size={22} samples={12} focus={0.6} />}
-        <Scene {...props} resetKey={resetKey} quality={quality} />
+        <Scene {...props} resetKey={resetKey} quality={quality} theme={theme} />
         <PhotoLook quality={quality} />
       </Canvas>
 

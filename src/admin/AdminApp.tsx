@@ -59,7 +59,7 @@ export default function AdminApp({ account }: { account: Account }) {
       <Shell>
         <div className="adm-card adm-narrow" role="alert">
           <h1>Not allowed</h1>
-          <p className="adm-muted">This page is for Tempo administrators only.</p>
+          <p className="adm-muted">This page is for Shatranj administrators only.</p>
           <a className="adm-btn" href="/">
             Back to the game
           </a>
@@ -92,7 +92,7 @@ function Shell({ children }: { children: ReactNode }) {
     <main className="adm-gate">
       <div className="adm-brand">
         <img src="/favicon.svg" alt="" width={34} height={34} />
-        <span>Tempo admin</span>
+        <span>Shatranj admin</span>
       </div>
       {children}
     </main>
@@ -113,7 +113,7 @@ function Enroll({ onDone }: { onDone: () => void }) {
     void (async () => {
       const { data } = await sb.auth.mfa.listFactors();
       for (const f of data?.all ?? []) if (f.status !== "verified") await sb.auth.mfa.unenroll({ factorId: f.id });
-      const res = await sb.auth.mfa.enroll({ factorType: "totp", friendlyName: "Tempo admin " + Date.now() });
+      const res = await sb.auth.mfa.enroll({ factorType: "totp", friendlyName: "Shatranj admin " + Date.now() });
       if (res.error) return setError(friendlyError(res.error));
       setQr(res.data.totp.qr_code);
       setSecret(res.data.totp.secret);
@@ -227,12 +227,13 @@ function Login({ email, note, onDone }: { email: string; note: string; onDone: (
   );
 }
 
-type Tab = "overview" | "online" | "users" | "guests" | "email" | "logs" | "audit";
+type Tab = "overview" | "online" | "users" | "guests" | "visitors" | "email" | "logs" | "audit";
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "online", label: "Online now" },
   { id: "users", label: "Users" },
   { id: "guests", label: "Guests" },
+  { id: "visitors", label: "Visitors" },
   { id: "email", label: "Email" },
   { id: "logs", label: "Logs" },
   { id: "audit", label: "Audit" },
@@ -286,7 +287,7 @@ function Panel({ account, onLock }: { account: Account; onLock: (message: string
       <header className="adm-top">
         <div className="adm-brand">
           <img src="/favicon.svg" alt="" width={30} height={30} />
-          <span>Tempo admin</span>
+          <span>Shatranj admin</span>
         </div>
         <nav className="adm-tabs" aria-label="Admin sections">
           {TABS.map((t) => (
@@ -311,6 +312,7 @@ function Panel({ account, onLock }: { account: Account; onLock: (message: string
         {tab === "online" && <Online act={act} />}
         {tab === "users" && <Users act={act} me={account.id} />}
         {tab === "guests" && <Guests act={act} />}
+        {tab === "visitors" && <Visitors act={act} />}
         {tab === "email" && (
           <section>
             <div className="adm-head">
@@ -528,8 +530,8 @@ function Users({ act, me }: { act: Act; me: string }) {
   async function run(label: string, op: string, args: Record<string, unknown>) {
     setMessage("");
     try {
-      await act(op, args);
-      setMessage(label);
+      const res = await act<{ ips?: number }>(op, args);
+      setMessage(label.replace("{ips}", String(res?.ips ?? 0)));
       await reload();
     } catch (err) {
       setMessage((err as Error).message);
@@ -612,7 +614,7 @@ function Users({ act, me }: { act: Act; me: string }) {
               ) : (
                 <span className="adm-actions">
                   {r.banned_until && Date.parse(String(r.banned_until)) > Date.now() ? (
-                    <button className="adm-mini" onClick={() => void run("Ban lifted.", "unban", { id: r.id })}>
+                    <button className="adm-mini" onClick={() => void run("Ban lifted ({ips} addresses freed).", "unban", { id: r.id })}>
                       Unban
                     </button>
                   ) : (
@@ -624,6 +626,20 @@ function Users({ act, me }: { act: Act; me: string }) {
                   )}
                   <button className="adm-mini" onClick={() => setMailing(r)}>
                     Email
+                  </button>
+                  <button
+                    className="adm-mini"
+                    title="Confirm this player's email address by hand (when the confirmation email never arrived)"
+                    onClick={() => void run("Email confirmed: the player can sign in now.", "confirmEmail", { id: r.id })}
+                  >
+                    Confirm email
+                  </button>
+                  <button
+                    className="adm-mini"
+                    title="Clear this player's email waits: they can ask for a new email right away"
+                    onClick={() => void run("Email limit cleared for this player.", "resetEmailLimit", { id: r.id })}
+                  >
+                    Reset email limit
                   </button>
                   {r.role !== "admin" && (
                     <button className="adm-mini is-danger" onClick={() => setDeleting(r)}>
@@ -650,10 +666,11 @@ function Users({ act, me }: { act: Act; me: string }) {
       {banning && (
         <BanDialog
           user={banning}
+          note="Also bans the account's last 3 addresses from guest play, so the player can't come back as a guest. On a shared network (campus, café) this blocks every guest there."
           onCancel={() => setBanning(null)}
           onBan={(minutes, reason) => {
             setBanning(null);
-            void run("Account suspended.", "ban", { id: banning.id, minutes, reason });
+            void run("Account suspended, with {ips} address(es) banned from guest play.", "ban", { id: banning.id, minutes, reason });
           }}
         />
       )}
@@ -799,6 +816,60 @@ function Guests({ act }: { act: Act }) {
           }}
         />
       )}
+    </section>
+  );
+}
+
+function Visitors({ act }: { act: Act }) {
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState({ q: "", filter: "all" });
+  const { data, error, busy } = useLoad(
+    () => act<{ rows: Row[] }>("visitors", { q: search.q || undefined, filter: search.filter }),
+    [search]
+  );
+  return (
+    <section>
+      <div className="adm-head">
+        <h2>Visitors</h2>
+        <form
+          className="adm-filters"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setSearch({ q: q.trim(), filter });
+          }}
+        >
+          <input placeholder="IP address, country (MA) or provider" value={q} onChange={(e) => setQ(e.target.value)} name="visitorq" />
+          <select value={filter} onChange={(e) => setFilter(e.target.value)} name="visitorfilter">
+            <option value="all">All visitors</option>
+            <option value="today">Last 24 hours</option>
+            <option value="blocked">Refused at least once</option>
+            <option value="accounts">With an account</option>
+          </select>
+          <button className="adm-btn" disabled={busy}>
+            Search
+          </button>
+        </form>
+      </div>
+      <p className="adm-muted">The 100 most recent addresses. "Refused" counts requests the server blocked (rate limits, bans, hidden addresses).</p>
+      {error && <p className="adm-error">{error}</p>}
+      <Table
+        rows={data?.rows ?? []}
+        empty="No visitors found."
+        columns={[
+          ["ip", "Address", (r) => <code>{text(r.ip)}</code>],
+          ["place", "From", (r) => [r.city, r.region, r.country].filter(Boolean).map(text).join(", ") || "—"],
+          ["org", "Provider", (r) => <span title={text(r.network)}>{text(r.org) || "—"}</span>],
+          ["pages", "Pages"],
+          ["hits", "Requests"],
+          ["blocked", "Refused", (r) => (Number(r.blocked) > 0 ? <strong className="adm-bad">{text(r.blocked)}</strong> : "0")],
+          ["accounts", "Accounts"],
+          ["flags", "Flags", (r) => (Array.isArray(r.flags) && r.flags.length ? (r.flags as string[]).join(", ") : "—")],
+          ["last_seen", "Last seen", (r) => when(r.last_seen)],
+          ["first_seen", "First seen", (r) => when(r.first_seen)],
+          ["last_path", "Last page", (r) => <span title={text(r.last_user_agent)}>{text(r.last_path) || "—"}</span>],
+        ]}
+      />
     </section>
   );
 }

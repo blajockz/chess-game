@@ -43,6 +43,13 @@ export const SPECIES = {
   ebony: { early: [38, 29, 25], late: [20, 14, 11], rings: 18, figure: 0.4, pores: 0.15 },
 } satisfies Record<string, Species>;
 
+export function stainedWood(base: Species, hex: string): Species {
+  const n = parseInt(hex.replace("#", ""), 16);
+  const early: [number, number, number] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const late = early.map((c, i) => Math.round(c * (base.late[i] / base.early[i]))) as [number, number, number];
+  return { ...base, early, late };
+}
+
 type Region = { x: number; y: number; w: number; h: number; wood: Species; seed: number; along: "x" | "y" };
 
 type WoodMaps = { map: THREE.CanvasTexture; roughnessMap: THREE.CanvasTexture; normalMap: THREE.CanvasTexture };
@@ -114,12 +121,12 @@ function paintWood(size: number, regions: Region[], extra?: (ctx: CanvasRenderin
   const toCanvas = (data: Uint8ClampedArray, after?: (ctx: CanvasRenderingContext2D) => void) => {
     const c = document.createElement("canvas");
     c.width = c.height = size;
-    const ctx = c.getContext("2d")!;
+    const ctx = c.getContext("2d", { willReadFrequently: true })!;
     const img = ctx.createImageData(size, size);
     img.data.set(data);
     ctx.putImageData(img, 0, 0);
     after?.(ctx);
-    return c;
+    return ctx.getImageData(0, 0, size, size);
   };
 
   const map = new THREE.CanvasTexture(toCanvas(color, extra));
@@ -137,7 +144,37 @@ const FILES = "abcdefgh";
 export const BOARD_SIZE = 9.4;
 const FRAME = (BOARD_SIZE - 8) / 2;
 
-export function boardMaps(size = 2048): WoodMaps {
+const painted = new Map<string, WoodMaps>();
+const BOARD_TOPS_KEPT = 2;
+
+function remembered(key: string, paint: () => WoodMaps, limit?: { prefix: string; keep: number }) {
+  const hit = painted.get(key);
+  if (hit) {
+    painted.delete(key);
+    painted.set(key, hit);
+    return hit;
+  }
+  const maps = paint();
+  painted.set(key, maps);
+  if (limit) {
+    const same = [...painted.keys()].filter((k) => k.startsWith(limit.prefix));
+    for (const old of same.slice(0, Math.max(0, same.length - limit.keep))) {
+      const gone = painted.get(old)!;
+      for (const t of [gone.map, gone.roughnessMap, gone.normalMap]) t.dispose();
+      painted.delete(old);
+    }
+  }
+  return maps;
+}
+
+export function boardMaps(light: Species = SPECIES.maple, dark: Species = SPECIES.walnut, size = 2048): WoodMaps {
+  return remembered(`board|${JSON.stringify(light)}|${JSON.stringify(dark)}|${size}`, () => paintBoard(light, dark, size), {
+    prefix: "board|",
+    keep: BOARD_TOPS_KEPT,
+  });
+}
+
+function paintBoard(light: Species, dark: Species, size: number): WoodMaps {
   const px = size / BOARD_SIZE;
   const frame = FRAME * px;
   const sq = px;
@@ -149,13 +186,13 @@ export function boardMaps(size = 2048): WoodMaps {
   ];
   for (let r = 0; r < 8; r++) {
     for (let f = 0; f < 8; f++) {
-      const light = (r + f) % 2 === 0;
+      const isLight = (r + f) % 2 === 0;
       regions.push({
         x: frame + f * sq,
         y: frame + r * sq,
         w: sq,
         h: sq,
-        wood: light ? SPECIES.maple : SPECIES.walnut,
+        wood: isLight ? light : dark,
         seed: 101 + r * 13 + f * 7,
         along: (r + f) % 4 < 2 ? "x" : "y",
       });
@@ -198,7 +235,9 @@ export function boardMaps(size = 2048): WoodMaps {
 }
 
 export function plankMaps(wood: Species, seed: number, size = 1024): WoodMaps {
-  return paintWood(size, [{ x: 0, y: 0, w: size, h: size, wood, seed, along: "x" }]);
+  return remembered(`plank|${JSON.stringify(wood)}|${seed}|${size}`, () =>
+    paintWood(size, [{ x: 0, y: 0, w: size, h: size, wood, seed, along: "x" }])
+  );
 }
 
 let pieceMaps: { w: WoodMaps; b: WoodMaps } | null = null;

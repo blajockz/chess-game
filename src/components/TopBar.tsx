@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import "./TopBar.css";
 import ThemePicker from "./ThemePicker";
 import type { ThemeId } from "../theme/themes";
@@ -31,23 +32,23 @@ export default function TopBar({
     <header className="topbar">
       <div className="identity">
         <img className="mark" src="/favicon.svg" alt="" width={34} height={34} />
-        <span className="wordmark">Tempo</span>
+        <span className="wordmark">{t("Shatranj")}</span>
       </div>
 
-      <div className="modes" role="group" aria-label="Game mode">
+      <div className="modes" role="group" aria-label={t("Game mode")}>
         <button
           className={mode === "default" ? "mode is-on" : "mode"}
           onClick={() => onModeChange("default")}
         >
-          Default
+          {t("Default")}
         </button>
         <button
           className={mode === "sim" ? "mode is-on" : "mode"}
           onClick={() => onModeChange("sim")}
           disabled={!simAvailable}
-          title={simAvailable ? "Play on a 3D board" : "This browser can't show 3D graphics"}
+          title={simAvailable ? t("Play on a 3D board") : t("This browser can't show 3D graphics")}
         >
-          Real-life sim
+          {t("Real-life sim")}
         </button>
       </div>
 
@@ -58,12 +59,12 @@ export default function TopBar({
           className="icon-btn"
           onClick={onSoundToggle}
           aria-pressed={soundOn}
-          title={soundOn ? "Mute sound" : "Unmute sound"}
+          title={soundOn ? t("Mute sound") : t("Unmute sound")}
         >
           {soundOn ? "🔊" : "🔇"}
         </button>
         <button className="btn" onClick={onNewGame}>
-          New game
+          {t("New game")}
         </button>
       </div>
     </header>

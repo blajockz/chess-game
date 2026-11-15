@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Move, Square } from "chess.js";
 import {
@@ -26,7 +27,7 @@ type Game = ReturnType<typeof useChessGame>;
 type Clocks = ReturnType<typeof useClocks>;
 
 const other = (s: Side): Side => (s === "w" ? "b" : "w");
-const NAME = { w: "White", b: "Black" };
+const NAME = { w: t("White"), b: t("Black") };
 
 export type { PlayedCard };
 
@@ -153,24 +154,24 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
     const cur = sRef.current;
     const { game, clocks, over, frozen, drawPending, you } = o.current;
     const def = CARDS[card];
-    if (!cur.on) return "Cards are off";
-    if (cur.used[side].includes(card)) return "Already used";
-    if (over) return "The game is over";
-    if (frozen.current) return "Not now";
+    if (!cur.on) return t("Cards are off");
+    if (cur.used[side].includes(card)) return t("Already used");
+    if (over) return t("The game is over");
+    if (frozen.current) return t("Not now");
     if (game.ply < UNLOCK_PLY) {
       const left = Math.ceil((UNLOCK_PLY - game.ply) / 2);
-      return `Cards unlock in ${left} move${left > 1 ? "s" : ""}`;
+      return t("Cards unlock in {left} move{v2}", { left, v2: left > 1 ? "s" : "" });
     }
-    if (game.turn !== side) return "Wait for your turn";
-    if (cur.lastPlayed[side] === game.ply) return "One card per turn";
-    if (game.inCheck) return "Not while in check";
-    if (side === you && drawPending) return "Not while your draw offer is open";
-    if (cur.charge[side] < def.cost) return `Needs ${def.cost} Charge`;
+    if (game.turn !== side) return t("Wait for your turn");
+    if (cur.lastPlayed[side] === game.ply) return t("One card per turn");
+    if (game.inCheck) return t("Not while in check");
+    if (side === you && drawPending) return t("Not while your draw offer is open");
+    if (cur.charge[side] < def.cost) return t("Needs {cost} Charge", { cost: def.cost });
     if (card === "thief") {
       const theirs = other(side) === "w" ? clocks.white : clocks.black;
-      if (theirs <= CLOCK_FLOOR_MS) return "Their clock is already under 10 s";
+      if (theirs <= CLOCK_FLOOR_MS) return t("Their clock is already under 10 s");
     }
-    if (def.targets > 0 && targets(card, side).length === 0) return "No valid target right now";
+    if (def.targets > 0 && targets(card, side).length === 0) return t("No valid target right now");
     return null;
   }
 
@@ -186,23 +187,23 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
     const a = amountsFor(category);
     const foe = other(side);
     let squares: string[] = [];
-    let message = `${NAME[side]} played ${CARDS[card].name}`;
+    let message = t("{side} played {card}", { side: NAME[side], card: t(CARDS[card].name) });
 
     if (card === "thief") {
       const theirs = foe === "w" ? clocks.white : clocks.black;
       const take = Math.min(a.steal * 1000, Math.max(0, theirs - CLOCK_FLOOR_MS));
       clocks.adjust(foe, -take);
       clocks.adjust(side, take);
-      message += `: took ${Math.round(take / 1000)} s`;
+      message += t(": took {n} s", { n: Math.round(take / 1000) });
     } else if (card === "overclock") {
       clocks.adjust(side, a.bonus * 1000);
       message += `: +${a.bonus} s`;
     } else if (card === "hourglass") {
       clocks.setMods(foe, { rate: 2, extra: a.cap * 1000 });
-      message += `: ${NAME[foe]}'s clock runs ×2`;
+      message += t(": {v1}'s clock runs ×2", { v1: NAME[foe] });
     } else if (card === "pause") {
       clocks.setMods(side, { free: a.cap * 1000 });
-      message += `: clock stopped for up to ${a.cap} s`;
+      message += t(": clock stopped for up to {cap} s", { cap: a.cap });
     } else if (card === "shield") {
       squares = [picks[0]];
     } else {
@@ -215,7 +216,7 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
       squares = result.squares;
     }
 
-    const played: PlayedCard = { ply: game.ply, side, card, squares, message };
+    const played: PlayedCard = { ply: game.ply, side, card, picks: [...picks], squares, message };
     setLocal((cur) => ({
       ...cur,
       charge: { ...cur.charge, [side]: cur.charge[side] - CARDS[card].cost },
@@ -263,7 +264,7 @@ export function useCards(opts: Options, shieldRef: ReturnType<typeof useShieldFi
       return;
     }
     setTargeting(null);
-    if (!play(targeting.card, side, picks)) setNote("That isn't allowed");
+    if (!play(targeting.card, side, picks)) setNote(t("That isn't allowed"));
   }
 
   function cancel() {

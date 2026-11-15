@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import "./PuzzlesPage.css";
 import { useEffect, useMemo, useState } from "react";
 import Board, { type BoardProps } from "../components/Board";
@@ -8,11 +9,30 @@ import Safe3D, { hasWebGL } from "../three/Safe3D";
 import { useSounds } from "../game/useSounds";
 import { loadTheme, saveTheme, themeById, type ThemeId } from "../theme/themes";
 import type { Account } from "../auth/AuthProvider";
-import { usePuzzle, type Phase } from "./usePuzzle";
+import { usePuzzle, type Armed, type Phase } from "./usePuzzle";
+import type { PuzzleKind } from "./api";
+import ActionCard from "../components/ActionCard";
+import CardGuide from "../components/CardGuide";
+import { CARDS, type CardId } from "../../shared/cards";
 import { DIFFICULTIES, THEME_GROUPS, themeName } from "./themes";
+import { useRating } from "../rating/useRating";
+import LevelDialog from "../rating/LevelDialog";
 
 const KEY_DIFFICULTY = "tempo.puzzleDifficulty";
 const KEY_THEME = "tempo.puzzleTheme";
+const KEY_CARD_THEME = "tempo.cardPuzzleTheme";
+const KEY_KIND = "tempo.puzzleKind";
+
+const PUZZLE_CARDS: CardId[] = ["leap", "swap", "retreat", "shield"];
+
+const AIM: Partial<Record<CardId, string[]>> = {
+  shield: [t("Choose the piece to shield")],
+  leap: [t("Choose the pawn to push")],
+  retreat: [t("Choose the piece to send home")],
+  swap: [t("Choose a knight or bishop"), t("Choose the piece to trade with")],
+};
+
+const tagName = (tag: string) => (tag in CARDS ? t(CARDS[tag as CardId].name) : themeName(tag));
 
 function remembered(key: string) {
   try {
@@ -29,32 +49,51 @@ function remember(key: string, value: string) {
   }
 }
 
-const SIDE = { w: "White", b: "Black" } as const;
+const SIDE = { w: t("White"), b: t("Black") } as const;
 
-function statusText(phase: Phase, side: string, message: string, solved: boolean | undefined) {
+type StatusInput = {
+  phase: Phase;
+  side: string;
+  message: string;
+  solved: boolean | undefined;
+  cards: boolean;
+  cardPlayed: boolean;
+  armed: Armed | null;
+  waiting: boolean;
+};
+
+function statusText({ phase, side, message, solved, cards, cardPlayed, armed, waiting }: StatusInput) {
   switch (phase) {
     case "loading":
-      return { tone: "", title: "Loading a puzzle…", text: "" };
+      return { tone: "", title: t("Loading a puzzle…"), text: waiting ? t("Waiting for the server…") : "" };
     case "intro":
-      return { tone: "", title: "Watch your opponent's move…", text: "" };
+      return { tone: "", title: t("Watch your opponent's move…"), text: "" };
     case "turn":
-      return { tone: "", title: "Your turn", text: `Find the best move for ${side}.` };
+      if (armed) {
+        const steps = AIM[armed.card] ?? [];
+        return { tone: "", title: t(CARDS[armed.card].name), text: t("{v1}. Esc to cancel.", { v1: steps[armed.picks.length] ?? "Choose a square" }) };
+      }
+      if (cards && !cardPlayed) return { tone: "", title: t("Your turn"), text: t("Play the right card, then the best move for {side}.", { side }) };
+      if (cards) return { tone: "good", title: t("Right card!"), text: t("Now find the best move for {side}.", { side }) };
+      return { tone: "", title: t("Your turn"), text: t("Find the best move for {side}.", { side }) };
     case "checking":
-      return { tone: "", title: "Checking…", text: "" };
+      return { tone: "", title: t("Checking…"), text: "" };
     case "right":
-      return { tone: "good", title: "Best move!", text: "Keep going." };
+      return { tone: "good", title: t("Best move!"), text: t("Keep going.") };
     case "solved":
-      return { tone: "good", title: "Solved!", text: "Well played." };
+      return { tone: "good", title: t("Solved!"), text: t("Well played.") };
     case "failed":
-      return { tone: "bad", title: "Puzzle failed", text: message || "That's not the move." };
+      return { tone: "bad", title: t("Puzzle failed"), text: message || t("That's not the move.") };
     case "solution":
-      return { tone: solved ? "good" : "bad", title: "Solution", text: "The board shows the whole line." };
+      return { tone: solved ? "good" : "bad", title: t("Solution"), text: t("The board shows the whole line.") };
     case "retry":
-      return { tone: "", title: "Practice", text: message || `Find the best move for ${side}. Not rated.` };
+      return { tone: "", title: t("Practice"), text: message || t("Find the {v1} for {side}. Not rated.", { v1: cards ? "card and the move" : "best move", side }) };
     case "retry-solved":
-      return { tone: "good", title: "Solved!", text: "Practice: not rated." };
-    case "error":
-      return { tone: "bad", title: "Something went wrong", text: message };
+      return { tone: "good", title: t("Solved!"), text: t("Practice: not rated.") };
+    case "empty":
+      return { tone: "", title: t("No puzzle here yet"), text: message };
+    case "paused":
+      return { tone: "", title: t("Puzzles are paused"), text: message };
   }
 }
 
@@ -73,9 +112,39 @@ export default function PuzzlesPage({ account, onSignOut }: { account: Account; 
     const n = Number(remembered(KEY_DIFFICULTY));
     return [-2, -1, 0, 1, 2].includes(n) ? n : 0;
   });
+  const [kind, setKind] = useState<PuzzleKind>(() => (remembered(KEY_KIND) === "cards" ? "cards" : "chess"));
   const [themeFilter, setThemeFilter] = useState(() => remembered(KEY_THEME) ?? "");
+  const [cardFilter, setCardFilter] = useState(() => {
+    const v = remembered(KEY_CARD_THEME) ?? "";
+    return PUZZLE_CARDS.includes(v as CardId) ? v : "";
+  });
+  const [guide, setGuide] = useState(false);
   const play = useSounds(soundOn);
-  const p = usePuzzle({ difficulty, theme: themeFilter || null, play });
+  const isCards = kind === "cards";
+  const filter = isCards ? cardFilter : themeFilter;
+  const p = usePuzzle({ kind, difficulty, theme: filter || null, play });
+
+  const { phase: puzzlePhase, next: loadNext } = p;
+  useEffect(() => {
+    if (puzzlePhase === "empty") void loadNext();
+  }, [filter]);
+
+  function chooseKind(next: PuzzleKind) {
+    if (next === kind) return;
+    setKind(next);
+    remember(KEY_KIND, next);
+  }
+
+  function chooseFilter(value: string) {
+    if (isCards) {
+      setCardFilter(value);
+      remember(KEY_CARD_THEME, value);
+    } else {
+      setThemeFilter(value);
+      remember(KEY_THEME, value);
+    }
+  }
+  const rating = useRating(account.guest === true);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -83,11 +152,20 @@ export default function PuzzlesPage({ account, onSignOut }: { account: Account; 
   }, [theme]);
 
   useEffect(() => {
-    document.title = "Puzzles · Tempo";
+    document.title = t("Puzzles · Shatranj");
   }, []);
 
   const side = SIDE[p.myColor];
-  const status = statusText(p.phase, side, p.message, p.end?.solved);
+  const status = statusText({
+    phase: p.phase,
+    side,
+    message: p.message,
+    solved: p.end?.solved,
+    cards: isCards,
+    cardPlayed: p.cardPlayed,
+    armed: p.armed,
+    waiting: p.waiting,
+  });
   const finished = p.phase === "solved" || p.phase === "failed" || p.phase === "solution" || p.phase === "retry-solved";
   const delta = p.end?.rating?.delta ?? null;
   const goPlay = () => window.location.assign("/");
@@ -103,9 +181,13 @@ export default function PuzzlesPage({ account, onSignOut }: { account: Account; 
     pending: p.pending,
     onPromote: p.onPromote,
     onCancelPromotion: p.cancelPromotion,
-    draggableColor: p.canMove ? p.myColor : null,
+    draggableColor: p.canMove && !p.armed ? p.myColor : null,
     flipped: p.myColor === "b",
     onSquareClick: p.onSquareClick,
+    cardTargets: p.cardTargets,
+    cardPicked: p.armed?.picks ?? [],
+    cardFlash: p.flash,
+    shielded: (p.shield as BoardProps["shielded"]) ?? null,
   };
 
   return (
@@ -118,7 +200,7 @@ export default function PuzzlesPage({ account, onSignOut }: { account: Account; 
         simAvailable={canThree}
         soundOn={soundOn}
         onSoundToggle={() => setSoundOn((on) => !on)}
-        control="Puzzles"
+        control={t("Puzzles")}
         onNewGame={goPlay}
         theme={theme}
         onThemeChange={setTheme}
@@ -130,9 +212,9 @@ export default function PuzzlesPage({ account, onSignOut }: { account: Account; 
         <section className="board-column">
           <div className={"pz-turn" + (p.phase === "turn" || p.phase === "retry" ? " is-on" : "")}>
             <span className={"pz-dot is-" + p.myColor} aria-hidden="true" />
-            {p.phase === "loading" ? "…" : `You play ${side}`}
+            {p.phase === "loading" ? "…" : t("You play {side}", { side })}
           </div>
-          <div className={"board-wrap pz-board" + (p.wrongMove ? " is-wrong" : "") + (p.phase === "solved" || p.phase === "retry-solved" ? " is-solved" : "")}>
+          <div className={"board-wrap pz-board" + (p.wrongMove || p.wrongCard ? " is-wrong" : "") + (p.phase === "solved" || p.phase === "retry-solved" ? " is-solved" : "")}>
             {mode === "sim" && canThree ? (
               <Safe3D props={boardProps} fallback={<Board {...boardProps} />} onFail={() => setMode("default")} />
             ) : (
@@ -142,44 +224,37 @@ export default function PuzzlesPage({ account, onSignOut }: { account: Account; 
         </section>
 
         <aside className="side-column pz-side">
-          <div className="pz-kind" role="tablist" aria-label="Puzzle type">
-            <button className="pz-kind-tab is-on" role="tab" aria-selected="true">
+          <div className="pz-kind" role="tablist" aria-label={t("Puzzle type")}>
+            <button className={"pz-kind-tab" + (!isCards ? " is-on" : "")} role="tab" aria-selected={!isCards} onClick={() => chooseKind("chess")}>
               <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
                 <path d="M12 3l2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L4.8 8.3l5-.7z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
               </svg>
-              Classic
+              {t("Classic")}
             </button>
-            <button className="pz-kind-tab" role="tab" aria-selected="false" disabled title="Puzzles with action cards are coming soon">
+            <button className={"pz-kind-tab" + (isCards ? " is-on" : "")} role="tab" aria-selected={isCards} onClick={() => chooseKind("cards")}>
               <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
                 <rect x="4" y="5" width="11" height="15" rx="2" fill="none" stroke="currentColor" strokeWidth="1.7" />
                 <path d="M9 3.5h9a2 2 0 0 1 2 2V17" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
               </svg>
-              Action cards
-              <span className="pz-soon">
-                <svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true">
-                  <rect x="5" y="11" width="14" height="9" rx="2" fill="currentColor" />
-                  <path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" strokeWidth="2.4" />
-                </svg>
-                Soon
-              </span>
+              {t("Action cards")}
             </button>
           </div>
 
           <section className="pz-card pz-rating" aria-live="polite">
             {account.guest ? (
               <>
-                <p className="pz-label">Puzzle rating</p>
-                <p className="pz-guest">Guests play without a rating.</p>
+                <p className="pz-label">{t("Puzzle rating")}</p>
+                <p className="pz-guest">{t("Guests play without a rating.")}</p>
                 <button className="pz-link" onClick={onSignOut}>
-                  Sign in to get your puzzle rating
+                  {t("Sign in to get your puzzle rating")}
                 </button>
               </>
             ) : (
               <>
-                <p className="pz-label">Your puzzle rating</p>
+                <p className="pz-label">{t("Your puzzle rating")}</p>
                 <p className="pz-number">
                   {p.me ? p.me.rating : "—"}
-                  {p.me?.provisional && <span className="pz-prov" title="Provisional: it settles after more puzzles">?</span>}
+                  {p.me?.provisional && <span className="pz-prov" title={t("Provisional: it settles after more puzzles")}>?</span>}
                   {delta !== null && (
                     <span className={"pz-delta " + (delta >= 0 ? "is-up" : "is-down")} key={p.end?.puzzle.id}>
                       {delta >= 0 ? `+${delta}` : delta}
@@ -189,11 +264,11 @@ export default function PuzzlesPage({ account, onSignOut }: { account: Account; 
                 {p.me && (
                   <p className="pz-stats">
                     <span>
-                      <strong>{p.me.solved}</strong>/{p.me.played} solved
+                      <strong>{p.me.solved}</strong>/{p.me.played} {t("solved")}
                     </span>
                     <span>
-                      Streak <strong>{p.me.streak}</strong>
-                      {p.me.bestStreak > 0 && <em> (best {p.me.bestStreak})</em>}
+                      {t("Streak")} <strong>{p.me.streak}</strong>
+                      {p.me.bestStreak > 0 && <em> {t("(best")} {p.me.bestStreak})</em>}
                     </span>
                   </p>
                 )}
@@ -201,28 +276,71 @@ export default function PuzzlesPage({ account, onSignOut }: { account: Account; 
             )}
           </section>
 
+          {isCards && p.hand.length > 0 && (
+            <section className={"pz-card pz-hand" + (p.canCard ? " is-live" : "")} aria-label={t("Your cards")}>
+              <p className="pz-label">
+                {t("Your cards")}
+                <button className="pz-help" onClick={() => setGuide(true)} aria-label={t("Card guide: what each card does")} title={t("Card guide")}>
+                  ?
+                </button>
+              </p>
+              <div className="pz-hand-cards">
+                {p.hand.map((card) => (
+                  <ActionCard
+                    key={card}
+                    card={card}
+                    compact
+                    width={86}
+                    selected={p.armed?.card === card}
+                    disabled={!p.canCard}
+                    title={t(CARDS[card].name)}
+                    onClick={() => p.onCard(card)}
+                  />
+                ))}
+              </div>
+              <p className="pz-hand-note">
+                {p.cardPlayed ? t("Card played.") : p.canCard ? t("Click a card, then its square on the board.") : t("One card per puzzle, before your move.")}
+              </p>
+            </section>
+          )}
+
           <section className={"pz-card pz-status" + (status.tone ? " is-" + status.tone : "")} role="status">
             <p className="pz-status-title">{status.title}</p>
             {status.text && <p className="pz-status-text">{status.text}</p>}
             <div className="pz-actions">
               {p.phase === "turn" && (
                 <button className="pz-btn" onClick={() => void p.giveUp()}>
-                  Give up
+                  {t("Give up")}
                 </button>
               )}
               {p.phase === "failed" && (
                 <button className="pz-btn" onClick={() => void p.showSolution()}>
-                  Show solution
+                  {t("Show solution")}
                 </button>
               )}
               {(finished || p.phase === "retry") && (
                 <button className="pz-btn" onClick={() => void p.retry()}>
-                  Retry
+                  {t("Retry")}
                 </button>
               )}
-              {(finished || p.phase === "error" || p.phase === "retry") && (
+              {(finished || p.phase === "retry") && (
                 <button className="pz-btn is-main" onClick={() => void p.next()}>
-                  Next puzzle
+                  {t("Next puzzle")}
+                </button>
+              )}
+              {p.phase === "empty" && filter && (
+                <button className="pz-btn is-main" onClick={() => chooseFilter("")}>
+                  {isCards ? t("Any card") : t("Any theme")}
+                </button>
+              )}
+              {p.phase === "empty" && !filter && isCards && (
+                <button className="pz-btn is-main" onClick={() => chooseKind("chess")}>
+                  {t("Classic puzzles")}
+                </button>
+              )}
+              {p.phase === "paused" && (
+                <button className="pz-btn is-main" onClick={() => void p.next()}>
+                  {t("Try again")}
                 </button>
               )}
             </div>
@@ -230,21 +348,21 @@ export default function PuzzlesPage({ account, onSignOut }: { account: Account; 
 
           {p.end && (
             <section className="pz-card pz-info">
-              <p className="pz-label">This puzzle</p>
+              <p className="pz-label">{t("This puzzle")}</p>
               <p className="pz-info-line">
-                Rated <strong>{p.end.puzzle.rating}</strong>
+                {t("Rated")} <strong>{p.end.puzzle.rating}</strong>
                 {p.end.puzzle.opening && <span> · {p.end.puzzle.opening.split(" ")[0].replace(/_/g, " ")}</span>}
               </p>
               <div className="pz-tags">
                 {p.end.puzzle.themes.map((t) => (
                   <span className="pz-tag" key={t}>
-                    {themeName(t)}
+                    {tagName(t)}
                   </span>
                 ))}
               </div>
               {(p.phase === "solution" || p.end.solved) && p.solutionText && (
                 <p className="pz-solution">
-                  <span>Solution</span> {p.solutionText}
+                  <span>{t("Solution")}</span> {p.solutionText}
                 </p>
               )}
             </section>
@@ -252,7 +370,7 @@ export default function PuzzlesPage({ account, onSignOut }: { account: Account; 
 
           <section className="pz-card pz-settings">
             <label className="pz-field">
-              <span>Difficulty</span>
+              <span>{t("Difficulty")}</span>
               <select
                 name="difficulty"
                 value={difficulty}
@@ -270,32 +388,50 @@ export default function PuzzlesPage({ account, onSignOut }: { account: Account; 
               </select>
             </label>
             <label className="pz-field">
-              <span>Theme</span>
-              <select
-                name="theme"
-                value={themeFilter}
-                onChange={(e) => {
-                  setThemeFilter(e.target.value);
-                  remember(KEY_THEME, e.target.value);
-                }}
-              >
-                <option value="">Any theme</option>
-                {THEME_GROUPS.map((g) => (
-                  <optgroup label={g.label} key={g.label}>
-                    {g.tags.map((t) => (
-                      <option value={t} key={t}>
-                        {themeName(t)}
+              <span>{isCards ? t("Card") : t("Theme")}</span>
+              <select name="theme" value={filter} onChange={(e) => chooseFilter(e.target.value)}>
+                {isCards ? (
+                  <>
+                    <option value="">{t("Any card")}</option>
+                    {PUZZLE_CARDS.map((c) => (
+                      <option value={c} key={c}>
+                        {t(CARDS[c].name)}
                       </option>
                     ))}
-                  </optgroup>
-                ))}
+                  </>
+                ) : (
+                  <>
+                    <option value="">{t("Any theme")}</option>
+                    {THEME_GROUPS.map((g) => (
+                      <optgroup label={g.label} key={g.label}>
+                        {g.tags.map((t) => (
+                          <option value={t} key={t}>
+                            {themeName(t)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </>
+                )}
               </select>
             </label>
-            <p className="pz-hint">Changes apply from the next puzzle.</p>
+            <p className="pz-hint">{t("Changes apply from the next puzzle.")}</p>
           </section>
 
         </aside>
       </main>
+
+      {guide && <CardGuide cards={p.hand.length ? p.hand : PUZZLE_CARDS} category="Blitz" onClose={() => setGuide(false)} />}
+
+      {rating.needsLevel && (
+        <LevelDialog
+          guest={account.guest === true}
+          onChoose={async (level) => {
+            await rating.choose(level);
+            void p.next();
+          }}
+        />
+      )}
     </div>
   );
 }

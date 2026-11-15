@@ -8,7 +8,7 @@
   border-radius: calc(var(--card-w) * 0.056);
   background: none;
   color: #fff3df;
-  font-family: Inter, system-ui, sans-serif;
+  font-family: var(--font-ui, Inter, system-ui, sans-serif);
   text-align: center;
   filter: drop-shadow(0 calc(var(--card-w) * 0.06) calc(var(--card-w) * 0.1) rgba(0, 0, 0, 0.55));
   transition: transform 0.18s ease, filter 0.18s ease;
@@ -75,8 +75,9 @@
   left: 8%;
   right: 8%;
   top: 68.5%;
-  font-family: "Instrument Serif", Georgia, serif;
-  font-size: calc(var(--card-w) * 0.105);
+  font-family: var(--font-display, Georgia, serif);
+  font-weight: 600;
+  font-size: calc(var(--card-w) * 0.115);
   line-height: 1.05;
   color: #fff0d6;
   text-shadow: 0 0 10px rgba(255, 130, 40, 0.75);
@@ -137,7 +138,7 @@
 
 .acard.is-compact .acard-name {
   top: 70%;
-  font-family: Inter, system-ui, sans-serif;
+  font-family: var(--font-ui, Inter, system-ui, sans-serif);
   font-size: calc(var(--card-w) * 0.125);
   font-weight: 600;
   line-height: 1.15;

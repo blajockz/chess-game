@@ -1,0 +1,236 @@
+.cg-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(6, 6, 5, 0.62);
+  backdrop-filter: blur(2px);
+  animation: cg-fade 0.16s ease-out;
+}
+
+.cg {
+  display: flex;
+  flex-direction: column;
+  width: min(620px, 100%);
+  max-height: min(760px, calc(100vh - 32px));
+  border-radius: 18px;
+  border: 1px solid var(--edge);
+  background:
+    radial-gradient(520px 260px at 30% 0%, rgba(166, 110, 50, 0.12), transparent 70%),
+    var(--card-fill);
+  background-color: var(--surface);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  color: var(--text);
+  font-family: var(--font-ui);
+  animation: cg-rise 0.2s ease-out;
+}
+
+.cg-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cg-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 27px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--gold-hi);
+}
+
+.cg-lead {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cg-close,
+.cg-done {
+  border: 0;
+  color: var(--gold-ink);
+  background: var(--gold-fill);
+  box-shadow: var(--gold-shadow);
+  font-weight: 700;
+  transition: filter 0.12s ease, transform 0.12s ease;
+}
+
+.cg-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+.cg-done {
+  padding: 10px 22px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.cg-close:hover,
+.cg-done:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.cg-close:focus-visible,
+.cg-done:focus-visible {
+  outline: 2px solid var(--gold-hi);
+  outline-offset: 2px;
+}
+
+.cg-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.cg-sub {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+
+.cg-basics {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(219, 186, 122, 0.22);
+  background: linear-gradient(180deg, rgba(219, 186, 122, 0.1), rgba(219, 186, 122, 0.04));
+}
+
+.cg-basics ol {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 4px;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.cg-card {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 240, 214, 0.03);
+}
+
+.cg-card > .acard {
+  flex: none;
+}
+
+.cg-info {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.cg-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 600;
+  color: var(--gold-hi);
+}
+
+.cg-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(219, 186, 122, 0.16);
+  color: var(--brass);
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.cg-chip.is-cost {
+  background: rgba(255, 154, 60, 0.16);
+  color: #ffb877;
+}
+
+.cg-what {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.cg-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.cg-facts dt {
+  color: var(--brass);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.cg-facts dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+.cg-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--line);
+}
+
+@keyframes cg-fade {
+  from { opacity: 0; }
+}
+
+@keyframes cg-rise {
+  from { opacity: 0; transform: translateY(10px); }
+}
+
+@media (max-width: 520px) {
+  .cg-card {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .cg-facts {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .cg-facts dd {
+    margin-bottom: 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cg-scrim,
+  .cg {
+    animation: none;
+  }
+}

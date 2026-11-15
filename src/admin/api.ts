@@ -18,8 +18,8 @@ async function reach(url: string, init: RequestInit) {
     throw new AdminError(
       "server_unreachable",
       import.meta.env.DEV
-        ? "Can't reach the Tempo server on port 8787. Is it running (npm run dev in the server folder)?"
-        : "Can't reach the Tempo server. Check your internet, or try again in a minute."
+        ? "Can't reach the Shatranj server on port 8787. Is it running (npm run dev in the server folder)?"
+        : "Can't reach the Shatranj server. Check your internet, or try again in a minute."
     );
   }
 }

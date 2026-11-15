@@ -1,7 +1,10 @@
+import { t } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Chess, type Move, type Square } from "chess.js";
-import { puzzleApi, PuzzleApiError, type MyRating, type PuzzleEnd, type PuzzleStart } from "./api";
+import { Chess, type Square } from "chess.js";
+import { puzzleApi, PuzzleApiError, type MyRating, type PuzzleEnd, type PuzzleKind, type PuzzleStart } from "./api";
 import type { SoundName } from "../game/useSounds";
+import { CARDS, targetsFor, type CardId } from "../../shared/cards";
+import { cardStep, cardStepText, isMoveStep, playStep, sameCardStep, type PuzzleBoard } from "../../shared/cardPuzzle";
 
 export type Phase =
   | "loading"
@@ -14,45 +17,50 @@ export type Phase =
   | "solution"
   | "retry"
   | "retry-solved"
-  | "error";
+  | "empty"
+  | "paused";
 
 type Pending = { from: Square; to: Square; color: "w" | "b" };
+type Snapshot = { fen: string; shield: string | null; last: { from: Square; to: Square } | null };
+export type Armed = { card: CardId; picks: Square[] };
 
 const SETUP_DELAY = 650;
 const REPLY_DELAY = 380;
 const SOLUTION_STEP = 700;
+const QUIET_TRIES = 2;
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-function soundOf(m: Move, chess: Chess): SoundName {
-  if (chess.isCheckmate()) return "end";
-  if (chess.inCheck()) return "check";
-  if (m.flags.includes("k") || m.flags.includes("q")) return "castle";
-  if (m.captured) return "capture";
-  return "move";
-}
-
-function apply(chess: Chess, uci: string): Move | null {
-  try {
-    return chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] });
-  } catch {
-    return null;
-  }
-}
 
 function kingSquare(chess: Chess, color: "w" | "b"): Square | null {
   for (const row of chess.board()) for (const cell of row) if (cell && cell.type === "k" && cell.color === color) return cell.square;
   return null;
 }
 
-export function usePuzzle(options: { difficulty: number; theme: string | null; play: (s: SoundName) => void }) {
-  const chess = useRef(new Chess());
+const picksNeeded = (card: CardId) => (CARDS[card].kind === "time" ? 0 : card === "swap" ? 2 : 1);
+
+function stops(err: unknown) {
+  if (!(err instanceof PuzzleApiError)) return false;
+  return err.code === "none" || err.code === "unavailable" || err.status === 401 || err.status === 403;
+}
+
+export function stepLabel(step: string) {
+  const c = cardStep(step);
+  if (!c) return step;
+  const name = t(CARDS[c.card].name);
+  if (c.card === "swap") return t("{name} {a} and {b}", { name, a: c.picks[0], b: c.picks[1] });
+  return c.picks.length ? `${name} ${c.picks[0]}` : name;
+}
+
+export function usePuzzle(options: { kind: PuzzleKind; difficulty: number; theme: string | null; play: (s: SoundName) => void }) {
+  const board = useRef<PuzzleBoard>({ chess: new Chess(), shield: null });
+  const history = useRef<Snapshot[]>([]);
   const gen = useRef(0);
   const settings = useRef(options);
   settings.current = options;
 
   const [phase, setPhase] = useState<Phase>("loading");
-  const [fen, setFen] = useState(chess.current.fen());
+  const [fen, setFen] = useState(board.current.chess.fen());
+  const [shield, setShield] = useState<string | null>(null);
   const [start, setStart] = useState<PuzzleStart | null>(null);
   const [end, setEnd] = useState<PuzzleEnd | null>(null);
   const [me, setMe] = useState<MyRating | null>(null);
@@ -62,50 +70,85 @@ export function usePuzzle(options: { difficulty: number; theme: string | null; p
   const [pending, setPending] = useState<Pending | null>(null);
   const [message, setMessage] = useState("");
   const [wrongMove, setWrongMove] = useState<{ from: Square; to: Square } | null>(null);
+  const [wrongCard, setWrongCard] = useState(false);
+  const [waiting, setWaiting] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [armed, setArmed] = useState<Armed | null>(null);
+  const [flash, setFlash] = useState<{ squares: Square[]; key: number } | null>(null);
   const line = useRef<string[]>([]);
+  const lastMoveRef = useRef<{ from: Square; to: Square } | null>(null);
 
-  const show = useCallback((m: Move | null) => {
-    setFen(chess.current.fen());
-    setLastMove(m ? { from: m.from, to: m.to } : null);
+  const sync = useCallback(() => {
+    setFen(board.current.chess.fen());
+    setShield(board.current.shield);
     setMoveKey((k) => k + 1);
-    if (m) settings.current.play(soundOf(m, chess.current));
   }, []);
 
-  const playUci = useCallback(
-    (uci: string) => {
-      const m = apply(chess.current, uci);
-      if (m) line.current.push(uci);
-      show(m);
-      return m;
+  const step = useCallback(
+    (text: string) => {
+      const b = board.current;
+      const snap: Snapshot = { fen: b.chess.fen(), shield: b.shield, last: lastMoveRef.current };
+      const result = playStep(b, text);
+      if (!result) return null;
+      history.current.push(snap);
+      line.current.push(text);
+      if (result.move) {
+        const m = result.move;
+        const last = { from: m.from as Square, to: m.to as Square };
+        lastMoveRef.current = last;
+        setLastMove(last);
+        const chess = b.chess;
+        settings.current.play(
+          chess.isCheckmate()
+            ? "end"
+            : chess.inCheck()
+              ? "check"
+              : m.flags.includes("k") || m.flags.includes("q")
+                ? "castle"
+                : m.captured
+                  ? "capture"
+                  : "move"
+        );
+      } else {
+        setFlash({ squares: result.squares as Square[], key: Date.now() });
+        settings.current.play("move");
+      }
+      sync();
+      return result;
     },
-    [show]
+    [sync]
   );
 
   const undo = useCallback(() => {
-    chess.current.undo();
+    const snap = history.current.pop();
+    if (!snap) return;
     line.current.pop();
-    const history = chess.current.history({ verbose: true });
-    const prev = history[history.length - 1] ?? null;
-    setFen(chess.current.fen());
-    setLastMove(prev ? { from: prev.from, to: prev.to } : null);
-    setMoveKey((k) => k + 1);
-  }, []);
+    board.current = { chess: new Chess(snap.fen), shield: snap.shield };
+    lastMoveRef.current = snap.last;
+    setLastMove(snap.last);
+    sync();
+  }, [sync]);
 
   const setUp = useCallback(
     async (p: PuzzleStart["puzzle"], my: number) => {
-      chess.current = new Chess(p.fen);
+      board.current = { chess: new Chess(p.fen), shield: null };
+      history.current = [];
       line.current = [];
+      lastMoveRef.current = null;
+      setLastMove(null);
       setSelected(null);
       setPending(null);
       setWrongMove(null);
-      show(null);
+      setWrongCard(false);
+      setArmed(null);
+      setFlash(null);
+      sync();
       await wait(SETUP_DELAY);
       if (gen.current !== my) return false;
-      playUci(p.setup);
+      step(p.setup);
       return true;
     },
-    [playUci, show]
+    [step, sync]
   );
 
   const load = useCallback(async () => {
@@ -113,18 +156,32 @@ export function usePuzzle(options: { difficulty: number; theme: string | null; p
     setPhase("loading");
     setEnd(null);
     setMessage("");
-    try {
-      const s = await puzzleApi.next(settings.current.difficulty, settings.current.theme);
-      if (gen.current !== my) return;
-      setStart(s);
-      if (s.me) setMe(s.me);
-      setPhase("intro");
-      if (!(await setUp(s.puzzle, my))) return;
-      setPhase("turn");
-    } catch (err) {
-      if (gen.current !== my) return;
-      setPhase("error");
-      setMessage(err instanceof PuzzleApiError ? err.message : "Couldn't load a puzzle. Try again.");
+    setWaiting(false);
+    setArmed(null);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const { kind, difficulty, theme } = settings.current;
+        const s = await puzzleApi.next(kind, difficulty, theme);
+        if (gen.current !== my) return;
+        setWaiting(false);
+        setStart(s);
+        if (s.me) setMe(s.me);
+        setPhase("intro");
+        if (!(await setUp(s.puzzle, my))) return;
+        setPhase("turn");
+        return;
+      } catch (err) {
+        if (gen.current !== my) return;
+        if (stops(err)) {
+          setStart(null);
+          setPhase((err as PuzzleApiError).code === "none" ? "empty" : "paused");
+          setMessage((err as PuzzleApiError).message);
+          return;
+        }
+        if (attempt >= QUIET_TRIES) setWaiting(true);
+        await wait(Math.min(10_000, 500 * 2 ** attempt));
+        if (gen.current !== my) return;
+      }
     }
   }, [setUp]);
 
@@ -133,7 +190,7 @@ export function usePuzzle(options: { difficulty: number; theme: string | null; p
     return () => {
       gen.current++;
     };
-  }, [load]);
+  }, [load, options.kind]);
 
   const finish = useCallback((result: PuzzleEnd) => {
     setEnd(result);
@@ -141,91 +198,148 @@ export function usePuzzle(options: { difficulty: number; theme: string | null; p
     setPhase(result.solved ? "solved" : "failed");
   }, []);
 
-  const retryMove = useCallback(
-    async (uci: string, my: number) => {
+  const cardPlayed = line.current.slice(1).some((s) => !isMoveStep(s));
+
+  const retryStep = useCallback(
+    async (text: string, my: number) => {
       const solution = end?.solution ?? [];
       const index = line.current.length;
-      const m = playUci(uci);
-      if (!m) return;
-      const right = uci === solution[index] || chess.current.isCheckmate();
+      const result = step(text);
+      if (!result) return;
+      const expected = solution[index] ?? "";
+      const right = text === expected || sameCardStep(text, expected) || (!!result.move && board.current.chess.isCheckmate());
       if (!right) {
-        setMessage("Not that one. Try again.");
-        setWrongMove({ from: m.from, to: m.to });
+        setMessage(result.move ? t("Not that one. Try again.") : t("Not that card. Try again."));
+        if (result.move) setWrongMove({ from: result.move.from as Square, to: result.move.to as Square });
         setBusy(true);
-        await wait(600);
+        await wait(650);
         setBusy(false);
         if (gen.current !== my) return;
         setWrongMove(null);
         undo();
         return;
       }
-      if (chess.current.isCheckmate() || index + 1 >= solution.length) {
+      if ((result.move && board.current.chess.isCheckmate()) || index + 1 >= solution.length) {
         setPhase("retry-solved");
-        setMessage("Solved! (practice, not rated)");
+        setMessage(t("Solved! (practice, not rated)"));
         return;
       }
-      setMessage("Right! Keep going.");
+      if (!result.move) {
+        setMessage(t("Right card! Now your move."));
+        return;
+      }
+      setMessage(t("Right! Keep going."));
       setBusy(true);
       await wait(REPLY_DELAY);
       setBusy(false);
       if (gen.current !== my) return;
-      playUci(solution[index + 1]);
+      step(solution[index + 1]);
     },
-    [end, playUci, undo]
+    [end, step, undo]
   );
 
   const send = useCallback(
-    async (uci: string) => {
+    async (text: string) => {
       const my = gen.current;
       setSelected(null);
-      if (phase === "retry") return retryMove(uci, my);
+      setArmed(null);
+      if (phase === "retry") return retryStep(text, my);
       if (!start) return;
-      const m = playUci(uci);
-      if (!m) return;
+      const result = step(text);
+      if (!result) return;
       setPhase("checking");
       try {
-        const answer = await puzzleApi.move(start.session, uci);
+        const answer = await puzzleApi.move(start.session, text);
         if (gen.current !== my) return;
         if (!answer.ok) {
-          setWrongMove({ from: m.from, to: m.to });
-          setMessage("That's not the move.");
+          if (result.move) {
+            setWrongMove({ from: result.move.from as Square, to: result.move.to as Square });
+            setMessage(settings.current.kind === "cards" && !cardPlayedBefore(line.current) ? t("This puzzle starts with a card.") : t("That's not the move."));
+          } else {
+            setWrongCard(true);
+            setMessage(t("That's not the card."));
+          }
           finish(answer as PuzzleEnd);
+          return;
+        }
+        if (!result.move) {
+          setMessage("");
+          setPhase("turn");
           return;
         }
         if (answer.reply) {
           setPhase("right");
-          setMessage("Best move! Keep going.");
+          setMessage(t("Best move! Keep going."));
           await wait(REPLY_DELAY);
           if (gen.current !== my) return;
-          playUci(answer.reply);
+          step(answer.reply);
         }
         if (answer.done) finish(answer as PuzzleEnd);
         else setPhase("turn");
       } catch (err) {
         if (gen.current !== my) return;
         undo();
-        setPhase("error");
-        setMessage(err instanceof PuzzleApiError ? err.message : "Couldn't check the move. Try the next puzzle.");
+        if (stops(err)) {
+          setPhase("paused");
+          setMessage((err as PuzzleApiError).message);
+          return;
+        }
+        void load();
       }
     },
-    [finish, phase, playUci, retryMove, start, undo]
+    [finish, load, phase, retryStep, start, step, undo]
   );
 
   const myColor = start?.puzzle.color ?? "w";
+  const hand: CardId[] = start?.puzzle.cards?.hand ?? [];
   const canMove = (phase === "turn" || phase === "retry") && !busy;
+  const canCard = canMove && hand.length > 0 && !cardPlayed && board.current.chess.turn() === myColor && !board.current.chess.inCheck();
 
-  const targetsOf = useCallback((sq: Square) => chess.current.moves({ square: sq, verbose: true }).map((m) => m.to as Square), []);
+  const targetsOf = useCallback((sq: Square) => board.current.chess.moves({ square: sq, verbose: true }).map((m) => m.to as Square), []);
+
+  const cardTargets: Square[] = armed && canCard ? (targetsFor(armed.card, fen, myColor, armed.picks) as Square[]) : [];
+
+  const onCard = useCallback(
+    (card: CardId) => {
+      if (!canCard || pending) return;
+      setSelected(null);
+      if (armed?.card === card) {
+        setArmed(null);
+        return;
+      }
+      if (picksNeeded(card) === 0) {
+        void send(cardStepText(card, []));
+        return;
+      }
+      setArmed({ card, picks: [] });
+    },
+    [armed, canCard, pending, send]
+  );
 
   const onSquareClick = useCallback(
     (sq: Square) => {
       if (!canMove || pending) return;
-      const piece = chess.current.get(sq);
+      if (armed) {
+        if (!cardTargets.includes(sq)) {
+          setArmed(null);
+          return;
+        }
+        const picks = [...armed.picks, sq];
+        if (picks.length < picksNeeded(armed.card)) {
+          setArmed({ card: armed.card, picks });
+          return;
+        }
+        void send(cardStepText(armed.card, picks));
+        return;
+      }
+      const chess = board.current.chess;
+      const piece = chess.get(sq);
       if (piece && piece.color === myColor) {
         setSelected(sq === selected ? null : sq);
         return;
       }
       if (!selected) return;
-      const move = chess.current.moves({ square: selected, verbose: true }).find((m) => m.to === sq);
+      const move = chess.moves({ square: selected, verbose: true }).find((m) => m.to === sq);
       if (!move) {
         setSelected(null);
         return;
@@ -236,7 +350,7 @@ export function usePuzzle(options: { difficulty: number; theme: string | null; p
       }
       void send(selected + sq);
     },
-    [canMove, myColor, pending, selected, send]
+    [armed, canMove, cardTargets, myColor, pending, selected, send]
   );
 
   const onPromote = useCallback(
@@ -252,36 +366,38 @@ export function usePuzzle(options: { difficulty: number; theme: string | null; p
   const giveUp = useCallback(async () => {
     if (!start || phase !== "turn") return;
     const my = gen.current;
+    setArmed(null);
     setPhase("checking");
     try {
       const result = await puzzleApi.giveUp(start.session);
       if (gen.current !== my) return;
       finish(result);
-    } catch (err) {
+    } catch {
       if (gen.current !== my) return;
-      setPhase("error");
-      setMessage(err instanceof PuzzleApiError ? err.message : "Couldn't reach the server.");
+      void load();
     }
-  }, [finish, phase, start]);
+  }, [finish, load, phase, start]);
 
   const showSolution = useCallback(async () => {
     if (!end) return;
     const my = ++gen.current;
     setPhase("solution");
     setMessage("");
+    setArmed(null);
     const last = line.current.length - 1;
-    if (last >= 0 && line.current[last] !== end.solution[last]) {
+    if (last >= 0 && line.current[last] !== end.solution[last] && !sameCardStep(line.current[last], end.solution[last] ?? "")) {
       await wait(250);
       if (gen.current !== my) return;
       setWrongMove(null);
+      setWrongCard(false);
       undo();
     }
     for (let i = line.current.length; i < end.solution.length; i++) {
       await wait(SOLUTION_STEP);
       if (gen.current !== my) return;
-      playUci(end.solution[i]);
+      step(end.solution[i]);
     }
-  }, [end, playUci]);
+  }, [end, step, undo]);
 
   const retry = useCallback(async () => {
     if (!start || !end) return;
@@ -292,27 +408,40 @@ export function usePuzzle(options: { difficulty: number; theme: string | null; p
     setPhase("retry");
   }, [end, setUp, start]);
 
+  useEffect(() => {
+    if (!armed) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setArmed(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [armed]);
+
   const solutionText = (() => {
     if (!end || !start) return "";
-    const c = new Chess(start.puzzle.fen);
+    const b: PuzzleBoard = { chess: new Chess(start.puzzle.fen), shield: null };
     const parts: string[] = [];
-    for (const uci of end.solution) {
-      const color = c.turn();
-      const number = Number(c.fen().split(" ")[5]);
-      const m = apply(c, uci);
-      if (!m) break;
-      if (color === "w") parts.push(`${number}. ${m.san}`);
-      else parts.push(parts.length === 0 ? `${number}... ${m.san}` : m.san);
+    let prev: "w" | "b" | null = null;
+    for (const text of end.solution) {
+      const color = b.chess.turn();
+      const number = Number(b.chess.fen().split(" ")[5]);
+      const r = playStep(b, text);
+      if (!r) break;
+      const label = r.move ? r.move.san : `[${stepLabel(text)}]`;
+      const prefix = prev === null ? `${number}${color === "w" ? "." : "..."} ` : color === "w" && prev !== "w" ? `${number}. ` : "";
+      parts.push(prefix + label);
+      prev = color;
     }
     return parts.join(" ");
   })();
 
-  const board = chess.current.board();
-  const turn = chess.current.turn();
-  const inCheck = chess.current.inCheck();
+  const chess = board.current.chess;
+  const turn = chess.turn();
+  const inCheck = chess.inCheck();
   return {
     phase,
     message,
+    waiting,
     solutionText,
     start,
     end,
@@ -320,14 +449,15 @@ export function usePuzzle(options: { difficulty: number; theme: string | null; p
     setMe,
     myColor,
     fen,
-    board,
+    board: chess.board(),
     selected,
-    legalTargets: selected && canMove ? targetsOf(selected) : [],
+    legalTargets: selected && canMove && !armed ? targetsOf(selected) : [],
     lastMove,
     wrongMove,
+    wrongCard,
     moveKey,
-    checkSquare: inCheck ? kingSquare(chess.current, turn) : null,
-    matedSquare: chess.current.isCheckmate() ? kingSquare(chess.current, turn) : null,
+    checkSquare: inCheck ? kingSquare(chess, turn) : null,
+    matedSquare: chess.isCheckmate() ? kingSquare(chess, turn) : null,
     pending,
     canMove,
     onSquareClick,
@@ -337,5 +467,18 @@ export function usePuzzle(options: { difficulty: number; theme: string | null; p
     giveUp,
     showSolution,
     retry,
+    hand,
+    canCard,
+    cardPlayed,
+    armed,
+    onCard,
+    cancelCard: () => setArmed(null),
+    cardTargets,
+    flash,
+    shield,
   };
+}
+
+function cardPlayedBefore(steps: string[]) {
+  return steps.slice(1, -1).some((s) => !isMoveStep(s));
 }

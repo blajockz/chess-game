@@ -1,3 +1,4 @@
+import { t, translateMessage } from "../i18n";
 import "./MovePanel.css";
 import { useEffect, useRef, useState } from "react";
 
@@ -37,13 +38,13 @@ type Props = {
 type Confirm = "resign" | "draw" | null;
 
 const QUESTION = {
-  resign: "Resign this game?",
-  draw: "Offer a draw?",
+  resign: t("Resign this game?"),
+  draw: t("Offer a draw?"),
 };
 
 const YES = {
-  resign: "Resign",
-  draw: "Offer",
+  resign: t("Resign"),
+  draw: t("Offer"),
 };
 
 function NavIcon({ kind }: { kind: "first" | "prev" | "next" | "last" }) {
@@ -100,7 +101,7 @@ export default function MovePanel({
       <button
         className={"move-cell" + (ply === current ? " is-current" : "")}
         onClick={() => review?.jump(ply)}
-        aria-label={`Show the position after ${san}`}
+        aria-label={t("Show the position after {san}", { san })}
         aria-current={ply === current ? "step" : undefined}
       >
         {card && <span className="move-card">{card}</span>}
@@ -130,15 +131,15 @@ export default function MovePanel({
   }
 
   let note: string | null = null;
-  if (!over && drawState === "waiting") note = "Draw offered. Waiting for an answer…";
-  if (!over && drawState === "declined") note = "Your opponent declined the draw.";
+  if (!over && drawState === "waiting") note = t("Draw offered. Waiting for an answer…");
+  if (!over && drawState === "declined") note = t("Your opponent declined the draw.");
 
   return (
     <aside className="rail">
-      <h2 className="rail-title">Moves</h2>
+      <h2 className="rail-title">{t("Moves")}</h2>
       {status && (
         <p className={"rail-status" + (over ? " is-over" : "")} role="status">
-          {status}
+          {translateMessage(status)}
         </p>
       )}
 
@@ -150,7 +151,7 @@ export default function MovePanel({
       )}
 
       {moves.length === 0 ? (
-        <p className="rail-empty">{emptyText ?? "Play a move to start the record."}</p>
+        <p className="rail-empty">{emptyText ?? t("Play a move to start the record.")}</p>
       ) : (
         <ol className="move-list" ref={listRef}>
           {moves.map((move, i) => (
@@ -164,22 +165,22 @@ export default function MovePanel({
       )}
 
       {review && moves.length > 0 && (
-        <div className="review-nav" role="group" aria-label="Review moves">
-          <button className="review-btn" onClick={review.first} disabled={!review.canBack} aria-label="First move" title="First move (Home)">
+        <div className="review-nav" role="group" aria-label={t("Review moves")}>
+          <button className="review-btn" onClick={review.first} disabled={!review.canBack} aria-label={t("First move")} title={t("First move (Home)")}>
             <NavIcon kind="first" />
           </button>
-          <button className="review-btn" onClick={review.prev} disabled={!review.canBack} aria-label="Previous move" title="Previous move (←)">
+          <button className="review-btn" onClick={review.prev} disabled={!review.canBack} aria-label={t("Previous move")} title={t("Previous move (←)")}>
             <NavIcon kind="prev" />
           </button>
-          <button className="review-btn" onClick={review.next} disabled={!review.canForward} aria-label="Next move" title="Next move (→)">
+          <button className="review-btn" onClick={review.next} disabled={!review.canForward} aria-label={t("Next move")} title={t("Next move (→)")}>
             <NavIcon kind="next" />
           </button>
           <button
             className={"review-btn" + (review.viewing ? " is-live" : "")}
             onClick={review.last}
             disabled={!review.canForward}
-            aria-label="Latest move"
-            title="Back to the live game (End)"
+            aria-label={t("Latest move")}
+            title={t("Back to the live game (End)")}
           >
             <NavIcon kind="last" />
           </button>
@@ -193,13 +194,13 @@ export default function MovePanel({
       )}
 
       {incomingDraw && !over && (
-        <div className="rail-offer" role="alertdialog" aria-label="Draw offer">
-          <span className="rail-question">Your opponent offers a draw</span>
+        <div className="rail-offer" role="alertdialog" aria-label={t("Draw offer")}>
+          <span className="rail-question">{t("Your opponent offers a draw")}</span>
           <button className="rail-btn" onClick={onDeclineDraw}>
-            Decline
+            {t("Decline")}
           </button>
           <button className="rail-btn is-yes" onClick={onAcceptDraw}>
-            Accept
+            {t("Accept")}
           </button>
         </div>
       )}
@@ -207,7 +208,7 @@ export default function MovePanel({
       {idle ? null : over ? (
         <div className="rail-actions">
           <button className="rail-btn is-primary" onClick={onNewGame}>
-            New game
+            {t("New game")}
           </button>
         </div>
       ) : confirm ? (
@@ -218,7 +219,7 @@ export default function MovePanel({
         >
           <span className="rail-question">{QUESTION[confirm]}</span>
           <button ref={noRef} className="rail-btn" onClick={() => setConfirm(null)}>
-            Cancel
+            {t("Cancel")}
           </button>
           <button className="rail-btn is-yes" onClick={accept}>
             {YES[confirm]}
@@ -231,7 +232,7 @@ export default function MovePanel({
             onClick={() => setConfirm("draw")}
             disabled={!canOfferDraw}
           >
-            Offer draw
+            {t("Offer draw")}
           </button>
           <button
             className="rail-btn"
@@ -239,16 +240,16 @@ export default function MovePanel({
             disabled={resignLockedFor > 0}
             title={
               resignLockedFor > 0
-                ? "You can resign after the first minute"
+                ? t("You can resign after the first minute")
                 : undefined
             }
           >
             {resignLockedFor > 0 ? (
               <>
-                Resign <span className="rail-wait">{resignLockedFor}s</span>
+                {t("Resign")} <span className="rail-wait">{resignLockedFor}s</span>
               </>
             ) : (
-              "Resign"
+              t("Resign")
             )}
           </button>
         </div>

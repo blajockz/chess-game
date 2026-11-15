@@ -32,11 +32,14 @@ export type GameState = {
   timeline: TimelineEvent[];
   mods: { w: ClockMods; b: ClockMods };
   lag: { w: number | null; b: number | null };
+  rated: boolean;
+  ratings: { w: number | null; b: number | null };
 };
 
 export type ClientMsg =
-  | { t: "create"; control: Control; side: Side | "random"; cards?: boolean; pow?: string }
+  | { t: "create"; control: Control; side: Side | "random"; cards?: boolean; rated?: boolean; pow?: string }
   | { t: "join"; room: string; token?: string; reclaim?: boolean; invite?: string; pow?: string }
+  | { t: "joinCode"; code: string; pow?: string }
   | { t: "move"; from: string; to: string; promotion?: string; ply: number }
   | { t: "card"; card: CardId; picks: string[]; ply: number }
   | { t: "resign" }
@@ -50,7 +53,7 @@ export type ServerMsg =
       side: Side;
       token: string;
       state: GameState;
-      invite?: { key: string; expiresIn: number };
+      invite?: { key: string; expiresIn: number; code?: string };
     }
   | { t: "state"; state: GameState; last?: { from: string; to: string; san: string } }
   | { t: "error"; code: ErrorCode; message: string; state?: GameState }
@@ -58,6 +61,7 @@ export type ServerMsg =
 
 export type ErrorCode =
   | "bad_message"
+  | "bad_code"
   | "no_room"
   | "room_full"
   | "not_in_room"
@@ -91,6 +95,7 @@ export const INVITE_TTL_MS = 10 * 60 * 1000;
 
 export const ROOM_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 export const ROOM_LENGTH = 6;
+export const GAME_CODE_LENGTH = 8;
 
 export const DEFAULT_PORT = 8787;
 

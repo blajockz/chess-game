@@ -148,6 +148,7 @@ export type PlayedCard = {
   ply: number;
   side: "w" | "b";
   card: CardId;
+  picks?: string[];
   squares: string[];
   message: string;
 };

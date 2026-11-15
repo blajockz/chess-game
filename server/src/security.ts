@@ -224,6 +224,10 @@ export function readMessage(raw: Buffer | ArrayBuffer | Buffer[], isBinary: bool
         pow: msg.pow as string | undefined,
       };
     }
+    case "joinCode": {
+      if (typeof msg.code !== "string" || msg.code.length > 20 || !optional(msg.pow, nonce)) return null;
+      return { t: "joinCode", code: msg.code, pow: msg.pow as string | undefined };
+    }
     case "move": {
       if (typeof msg.from !== "string" || !SQUARE.test(msg.from)) return null;
       if (typeof msg.to !== "string" || !SQUARE.test(msg.to)) return null;

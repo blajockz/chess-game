@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import "./Sidebar.css";
 import AdminBadge, { AdminCrest } from "./AdminBadge";
 
@@ -8,7 +9,8 @@ type Props = {
   onOpen: (item: SidebarItem) => void;
   account?: { name: string; role: "user" | "admin"; guest?: boolean } | null;
   onSignOut?: () => void;
-  current?: "play" | "puzzles";
+  current?: "play" | "puzzles" | "history" | "settings";
+  onJoin?: () => void;
 };
 
 function Icon({ kind }: { kind: SidebarItem }) {
@@ -36,13 +38,13 @@ function Icon({ kind }: { kind: SidebarItem }) {
 }
 
 const ITEMS: { id: SidebarItem; label: string; hint: string }[] = [
-  { id: "bot", label: "New game", hint: "Choose a time control and play Tempo Bot" },
-  { id: "friend", label: "Play a friend", hint: "Create a link and play a friend online" },
+  { id: "bot", label: t("New game"), hint: t("Choose a time control and play Shatranj Bot") },
+  { id: "friend", label: t("Play a friend"), hint: t("Create a link and play a friend online") },
 ];
 
-export default function Sidebar({ open, onOpen, account, onSignOut, current = "play" }: Props) {
+export default function Sidebar({ open, onOpen, account, onSignOut, current = "play", onJoin }: Props) {
   return (
-    <nav className="sidebar" aria-label="Games">
+    <nav className="sidebar" aria-label={t("Games")}>
       {ITEMS.map((item) => (
         <button
           key={item.id}
@@ -56,11 +58,22 @@ export default function Sidebar({ open, onOpen, account, onSignOut, current = "p
           <span className="sb-label">{item.label}</span>
         </button>
       ))}
+      <button
+        className="sb-item sb-join"
+        onClick={onJoin ?? (() => window.location.assign("/?join"))}
+        title={t("Enter a game code to join a friend's game")}
+      >
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <rect x="3" y="7" width="18" height="10" rx="3" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          <path d="M7.5 12h.01M12 12h.01M16.5 12h.01" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+        </svg>
+        <span className="sb-label">{t("Join game")}</span>
+      </button>
       <a
         className={"sb-item sb-puzzles" + (current === "puzzles" ? " is-on" : "")}
         href="/puzzles"
         aria-current={current === "puzzles" ? "page" : undefined}
-        title="Solve chess puzzles at your level"
+        title={t("Solve chess puzzles at your level")}
       >
         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
           <path
@@ -71,20 +84,40 @@ export default function Sidebar({ open, onOpen, account, onSignOut, current = "p
             strokeLinejoin="round"
           />
         </svg>
-        <span className="sb-label">Puzzles</span>
+        <span className="sb-label">{t("Puzzles")}</span>
+      </a>
+      <a
+        className={"sb-item sb-history" + (current === "history" ? " is-on" : "")}
+        href="/history"
+        aria-current={current === "history" ? "page" : undefined}
+        title={t("Your past games, and their reviews")}
+      >
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <path d="M4.2 4.8v3.6h3.6" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M12 8v4.3l2.8 1.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <span className="sb-label">{t("History")}</span>
       </a>
       {account?.role === "admin" && (
-        <a className="sb-item sb-admin" href="/admin" title="Open the admin dashboard (asks for your password and code)">
+        <a className="sb-item sb-admin" href="/admin" title={t("Open the admin dashboard (asks for your password and code)")}>
           <AdminCrest className="sb-admin-crest" />
-          <span className="sb-label">Admin panel</span>
+          <span className="sb-label">{t("Admin panel")}</span>
         </a>
       )}
       {account && onSignOut && (
         <div
           className={"account" + (account.role === "admin" ? " is-admin" : "") + (account.guest ? " is-guest" : "")}
-          title={account.guest ? `${account.name}: playing as a guest (no rating)` : account.name}
+          title={account.guest ? t("{name}: playing as a guest (no rating)", { name: account.name }) : account.name}
         >
           <span className="account-avatar">
+            <a
+              className={"account-settings" + (current === "settings" ? " is-on" : "")}
+              href="/settings"
+              aria-label={t("Account settings")}
+              title={t("Settings: name, password, email, language, theme")}
+              aria-current={current === "settings" ? "page" : undefined}
+            />
             <span className="account-badge" aria-hidden="true">
               {account.guest ? (
                 <svg viewBox="0 0 24 24" width="17" height="17">
@@ -101,14 +134,19 @@ export default function Sidebar({ open, onOpen, account, onSignOut, current = "p
               </span>
             )}
           </span>
-          <span className="account-name">{account.name}</span>
-          {account.guest && <span className="account-tag">Guest</span>}
+          <a className="account-name account-link" href="/settings" title={t("Account settings")}>
+            {account.name}
+            <span className="account-gear" aria-hidden="true">
+              {t("Settings")}
+            </span>
+          </a>
+          {account.guest && <span className="account-tag">{t("Guest")}</span>}
           <button
             className="account-out"
             onClick={onSignOut}
-            title={account.guest ? "Sign in or create an account (you can come back as this guest)" : undefined}
+            title={account.guest ? t("Sign in or create an account (you can come back as this guest)") : undefined}
           >
-            {account.guest ? "Sign in" : "Sign out"}
+            {account.guest ? t("Sign in") : t("Sign out")}
           </button>
         </div>
       )}

@@ -1,0 +1,69 @@
+.lang-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted, #b9ad98);
+  font-size: 13px;
+}
+
+.lang-label {
+  margin-inline-end: 4px;
+}
+
+.lang-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.lang-pick select {
+  padding: 8px 10px;
+  border: 1px solid var(--line, rgba(255, 240, 214, 0.12));
+  border-radius: 9px;
+  background: var(--field, #1a1915);
+  color: var(--text, #f2e9d8);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.lang-pick select:focus-visible {
+  outline: 2px solid var(--gold-hi, #ecd5a4);
+  outline-offset: 1px;
+}
+
+.lang-pick.is-compact select {
+  padding: 6px 8px;
+  font-size: 12.5px;
+}
+
+.auth-lang {
+  position: fixed;
+  top: 14px;
+  inset-inline-end: 16px;
+  z-index: 2;
+}
+
+[dir="rtl"] .auth-show {
+  right: auto;
+  left: 6px;
+}
+
+[dir="rtl"] .auth-guest-btn svg {
+  transform: scaleX(-1);
+}
+
+[dir="rtl"] .auth input[type="email"],
+[dir="rtl"] .st-input[type="email"],
+[dir="rtl"] .join-code {
+  direction: ltr;
+  text-align: start;
+}
+
+[dir="rtl"] .auth-password input {
+  padding-right: 12px;
+  padding-left: 64px;
+}
