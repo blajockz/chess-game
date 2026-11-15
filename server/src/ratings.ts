@@ -17,7 +17,7 @@ const BOT_RD = 110;
 const ABANDON_GRACE_MS = Number(process.env.RATED_GRACE_MS) || 90_000;
 const ABANDON_MAX_MS = 4 * 60 * 60_000;
 
-type Ticket = { id: string; bot: number; at: number };
+type Ticket = { id: string; bot: number; at: number; rated?: boolean };
 
 type Row = {
   user_id: string;
@@ -47,7 +47,26 @@ export class RatingError extends Error {
 }
 
 const memory = new Map<string, Row>();
+const memoryBotGames = new Map<string, number[]>();
 const limiter = new RateLimiter(30, 0.5);
+const BOT_GAME_WINDOW_MS = 24 * 60 * 60_000;
+const BOT_GAME_LIMIT = 20;
+
+async function dailyBotLimitReached(userId: string) {
+  const since = Date.now() - BOT_GAME_WINDOW_MS;
+  if (!LOGS_ON) {
+    const recent = (memoryBotGames.get(userId) ?? []).filter((at) => at > since);
+    memoryBotGames.set(userId, recent);
+    return recent.length >= BOT_GAME_LIMIT;
+  }
+  const after = encodeURIComponent(new Date(since).toISOString());
+  const query = (column: "white_id" | "black_id") =>
+    rest("GET", `games?select=id&kind=eq.bot&${column}=eq.${userId}&rated=eq.true&ended_at=gte.${after}&limit=${BOT_GAME_LIMIT}`, undefined, "").then(
+      (res) => res.json() as Promise<{ id: string }[]>
+    );
+  const [white, black] = await Promise.all([query("white_id"), query("black_id")]);
+  return white.length + black.length >= BOT_GAME_LIMIT;
+}
 
 async function rows(userId: string): Promise<Row[]> {
   if (!LOGS_ON) return (["chess", "cards"] as Mode[]).map((m) => memory.get(`${userId}:${m}`)).filter((r): r is Row => !!r);
@@ -93,6 +112,10 @@ function apply(row: Row, opponent: { rating: number; rd: number }, score: 0 | 0.
 async function settle(row: Row, starting: boolean) {
   const t = row.open_ticket;
   if (!t) return false;
+  if (t.rated === false) {
+    row.open_ticket = null;
+    return true;
+  }
   const age = Date.now() - t.at;
   if (age < (starting ? ABANDON_GRACE_MS : ABANDON_MAX_MS)) {
     if (!starting) return false;
@@ -146,14 +169,20 @@ async function startBotGame(userId: string, body: Record<string, unknown>) {
   if (!Number(body.botElo)) throw new RatingError(400, "bad_request", "Which bot?");
   const row = (await rows(userId)).find((r) => r.mode === mode);
   if (!row) throw new RatingError(409, "no_level", "Choose your level first.");
+  let rated = false;
+  try {
+    rated = !(await dailyBotLimitReached(userId));
+  } catch {
+  }
   const before = Math.round(row.rating);
   const hadOpen = !!row.open_ticket && Date.now() - row.open_ticket.at >= ABANDON_GRACE_MS;
   await settle(row, true);
-  row.open_ticket = { id: randomBytes(12).toString("base64url"), bot, at: Date.now() };
+  row.open_ticket = { id: randomBytes(12).toString("base64url"), bot, at: Date.now(), rated };
   await save(row);
   return {
     ticket: row.open_ticket.id,
     rating: shown(row),
+    rated,
     abandoned: hadOpen ? { before, after: Math.round(row.rating), delta: Math.round(row.rating) - before } : null,
   };
 }
@@ -169,13 +198,19 @@ async function leaveBotGame(userId: string, ticket: unknown) {
   return { left: after === before ? null : { before, after, delta: after - before } };
 }
 
-export async function rateBotGame(userId: string, mode: Mode, ticket: unknown, bot: number, score: 0 | 0.5 | 1): Promise<Change | null> {
+export async function rateBotGame(userId: string, mode: Mode, ticket: unknown, bot: number, score: 0 | 0.5 | 1 | null): Promise<Change | null> {
   if (typeof ticket !== "string" || !ticket) return null;
   const row = (await rows(userId)).find((r) => r.mode === mode);
   if (!row?.open_ticket || row.open_ticket.id !== ticket || row.open_ticket.bot !== bot) return null;
+  const rated = row.open_ticket.rated !== false;
   row.open_ticket = null;
+  if (!rated || score === null) {
+    await save(row);
+    return null;
+  }
   const change = apply(row, { rating: bot, rd: BOT_RD }, score);
   await save(row);
+  if (!LOGS_ON) memoryBotGames.set(userId, [...(memoryBotGames.get(userId) ?? []), Date.now()]);
   return change;
 }
 

@@ -82,7 +82,10 @@ export async function saveGame(record: GameRecord, guest: boolean, ticket: strin
         ...(ticket ? { rated: true, ticket } : {}),
       },
     });
-    return { text: t("Saved to your history."), rating: saved.rating ?? null };
+    return {
+      text: t(saved.rating || !ticket ? "Saved to your history." : "Saved to your history without a rating change."),
+      rating: saved.rating ?? null,
+    };
   } catch (err) {
     const refused = err instanceof HistoryError && err.status >= 400 && err.status < 500;
     if (!keepLocally(record)) return plain(t("This game couldn't be saved."));

@@ -26,12 +26,31 @@ type Side = "w" | "b";
 const other = (s: Side): Side => (s === "w" ? "b" : "w");
 const NAME = { w: "White", b: "Black" };
 
+export class PositionCounts {
+  private counts = new Map<string, number>();
+
+  constructor(fen: string) {
+    this.record(fen);
+  }
+
+  record(fen: string) {
+    const key = fen.split(/\s+/).slice(0, 4).join(" ");
+    this.counts.set(key, (this.counts.get(key) ?? 0) + 1);
+  }
+
+  isThreefold(fen: string) {
+    const key = fen.split(/\s+/).slice(0, 4).join(" ");
+    return (this.counts.get(key) ?? 0) >= 3;
+  }
+}
+
 export type Control = { initial: number; increment: number; blackInitial?: number };
 
 export class CardRuleError extends Error {}
 
 export class CardReferee {
   chess = new Chess();
+  positionCounts = new PositionCounts(this.chess.fen());
   ply = 0;
   cards: CardsState;
   steps: TimelineEvent[] = [];
@@ -162,6 +181,7 @@ export class CardReferee {
     }
     this.ply++;
     this.steps.push({ t: "move", san: played.san });
+    this.positionCounts.record(this.chess.fen());
     if (this.clock) {
       this.clock[side] += this.control.increment * 1000;
       this.trail.push(Math.round(this.clock[side]));
@@ -180,7 +200,7 @@ export class CardReferee {
     const c = this.chess;
     if (c.isCheckmate()) return `${NAME[other(this.turn)]} wins by checkmate`;
     if (c.isStalemate()) return "Draw by stalemate";
-    if (c.isThreefoldRepetition()) return "Draw by repetition";
+    if (this.positionCounts.isThreefold(c.fen())) return "Draw by repetition";
     if (c.isInsufficientMaterial()) return "Draw by insufficient material";
     if (c.isDraw()) return "Draw";
     return null;

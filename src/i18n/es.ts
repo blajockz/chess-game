@@ -940,6 +940,21 @@ const dict: Record<string, string> = {
   "{who} clock runs ×2": "Reloj {who} ×2",
   "{winner} wins: {who} didn't move for {formatWait}": "Ganan las {winner}: las {who} no movieron durante {formatWait}",
   "← Back to sign in": "← Volver a iniciar sesión",
+
+  " and ": " y ",
+  "keeps the advantage": "mantiene la ventaja",
+  "holds the position": "mantiene la posición",
+  "The cards don't match the moves.": "Las cartas no coinciden con las jugadas.",
+  "Can't reach the game server. Make sure it's running (npm run dev in the server folder).": "No se puede conectar con el servidor de juego. Comprueba que esté en marcha (npm run dev en la carpeta server).",
+  "no answer after {v1} s": "sin respuesta después de {v1} s",
+  "Turnstile didn't start": "Turnstile no se inició",
+  "Turnstile couldn't load": "No se pudo cargar Turnstile",
+  "VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY are missing. Add them to the .env file (and to Render), then build again.": "Faltan VITE_SUPABASE_URL y VITE_SUPABASE_PUBLISHABLE_KEY. Añádelas al archivo .env (y a Render) y vuelve a compilar.",
+
+  "Cards unlock in {left} move": "Las cartas se desbloquean en {left} movimiento",
+  "Cards unlock in {left} moves": "Las cartas se desbloquean en {left} movimientos",
+  "This game will be saved without a rating change.": "Esta partida se guardará sin cambios en la clasificación.",
+  "Saved to your history without a rating change.": "Guardada en tu historial sin cambios en la clasificación.",
 };
 
 export default dict;

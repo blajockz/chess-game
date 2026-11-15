@@ -76,6 +76,8 @@ export function usePuzzle(options: { kind: PuzzleKind; difficulty: number; theme
   const [armed, setArmed] = useState<Armed | null>(null);
   const [flash, setFlash] = useState<{ squares: Square[]; key: number } | null>(null);
   const line = useRef<string[]>([]);
+  const [solStep, setSolStep] = useState(0);
+  const solStepRef = useRef(0);
   const lastMoveRef = useRef<{ from: Square; to: Square } | null>(null);
 
   const sync = useCallback(() => {
@@ -392,12 +394,55 @@ export function usePuzzle(options: { kind: PuzzleKind; difficulty: number; theme
       setWrongCard(false);
       undo();
     }
+    solStepRef.current = line.current.length;
+    setSolStep(line.current.length);
     for (let i = line.current.length; i < end.solution.length; i++) {
       await wait(SOLUTION_STEP);
       if (gen.current !== my) return;
       step(end.solution[i]);
+      solStepRef.current = line.current.length;
+      setSolStep(line.current.length);
     }
   }, [end, step, undo]);
+
+  const goToSolution = useCallback(
+    (target: number) => {
+      if (phase !== "solution" || !start || !end) return;
+      const total = end.solution.length;
+      const i = Math.max(0, Math.min(total, target));
+      if (i === solStepRef.current) return;
+      gen.current++;
+      const b: PuzzleBoard = { chess: new Chess(start.puzzle.fen), shield: null };
+      let last: { from: Square; to: Square } | null = null;
+      let latest: ReturnType<typeof playStep> = null;
+      for (let k = 0; k < i; k++) {
+        const r = playStep(b, end.solution[k]);
+        if (!r) break;
+        latest = r;
+        if (r.move) last = { from: r.move.from as Square, to: r.move.to as Square };
+      }
+      const forward = i === solStepRef.current + 1;
+      board.current = b;
+      history.current = [];
+      line.current = end.solution.slice(0, i);
+      lastMoveRef.current = last;
+      setLastMove(last);
+      setWrongMove(null);
+      setWrongCard(false);
+      setSelected(null);
+      setFlash(latest && !latest.move ? { squares: latest.squares as Square[], key: Date.now() } : null);
+      if (forward && latest) {
+        const m = latest.move;
+        settings.current.play(
+          !m ? "move" : b.chess.isCheckmate() ? "end" : b.chess.inCheck() ? "check" : m.captured ? "capture" : "move"
+        );
+      }
+      solStepRef.current = i;
+      setSolStep(i);
+      sync();
+    },
+    [end, phase, start, sync]
+  );
 
   const retry = useCallback(async () => {
     if (!start || !end) return;
@@ -467,6 +512,14 @@ export function usePuzzle(options: { kind: PuzzleKind; difficulty: number; theme
     giveUp,
     showSolution,
     retry,
+    solution: {
+      step: solStep,
+      total: end?.solution.length ?? 0,
+      first: () => goToSolution(0),
+      prev: () => goToSolution(solStepRef.current - 1),
+      next: () => goToSolution(solStepRef.current + 1),
+      last: () => goToSolution(end?.solution.length ?? 0),
+    },
     hand,
     canCard,
     cardPlayed,

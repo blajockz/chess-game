@@ -940,6 +940,21 @@ const dict: Record<string, string> = {
   "{who} clock runs ×2": "ساعة {who} ×2",
   "{winner} wins: {who} didn't move for {formatWait}": "فاز {winner}: {who} لم يتحرك لمدة {formatWait}",
   "← Back to sign in": "← العودة إلى تسجيل الدخول",
+
+  " and ": " و ",
+  "keeps the advantage": "يحافظ على الأفضلية",
+  "holds the position": "يحافظ على توازن الوضعية",
+  "The cards don't match the moves.": "البطاقات لا تطابق النقلات.",
+  "Can't reach the game server. Make sure it's running (npm run dev in the server folder).": "تعذّر الوصول إلى خادم اللعبة. تأكد من أنه يعمل (npm run dev في مجلد server).",
+  "no answer after {v1} s": "لا إجابة بعد {v1} ث",
+  "Turnstile didn't start": "لم يبدأ Turnstile",
+  "Turnstile couldn't load": "تعذّر تحميل Turnstile",
+  "VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY are missing. Add them to the .env file (and to Render), then build again.": "متغيرا VITE_SUPABASE_URL وVITE_SUPABASE_PUBLISHABLE_KEY غير موجودين. أضفهما إلى ملف .env (وكذلك إلى Render)، ثم أعد البناء.",
+
+  "Cards unlock in {left} move": "تُفتح البطاقات بعد {left} نقلة",
+  "Cards unlock in {left} moves": "تُفتح البطاقات بعد {left} نقلات",
+  "This game will be saved without a rating change.": "ستُحفظ هذه المباراة دون تغيير التصنيف.",
+  "Saved to your history without a rating change.": "حُفظت في سجلّك دون تغيير التصنيف.",
 };
 
 export default dict;

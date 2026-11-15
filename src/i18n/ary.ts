@@ -940,6 +940,21 @@ const dict: Record<string, string> = {
   "{who} clock runs ×2": "مكانة {who} ×2",
   "{winner} wins: {who} didn't move for {formatWait}": "ربحو {winner}: {who} ما تحركوش لمدة {formatWait}",
   "← Back to sign in": "← رجع للدخول",
+
+  " and ": " و ",
+  "keeps the advantage": "كيحافظ على الأفضلية",
+  "holds the position": "كيحافظ على توازن الوضعية",
+  "The cards don't match the moves.": "الكارطات ما مطابقينش للحركات.",
+  "Can't reach the game server. Make sure it's running (npm run dev in the server folder).": "ما قدرناش نوصلو لسيرفور اللعبة. تأكد واش خدام (npm run dev فدوسي server).",
+  "no answer after {v1} s": "ما كاين حتى جواب من بعد {v1} ث",
+  "Turnstile didn't start": "Turnstile ما بداش",
+  "Turnstile couldn't load": "ما قدرناش نحملو Turnstile",
+  "VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY are missing. Add them to the .env file (and to Render), then build again.": "VITE_SUPABASE_URL وVITE_SUPABASE_PUBLISHABLE_KEY ما كاينينش. زيدهم لملف .env (وحتى فـ Render)، ومن بعد عاود البناء.",
+
+  "Cards unlock in {left} move": "الكارطات كيتحلو من بعد {left} حركة",
+  "Cards unlock in {left} moves": "الكارطات كيتحلو من بعد {left} حركات",
+  "This game will be saved without a rating change.": "هاد الماتش غادي يتحفظ بلا ما يتبدل التصنيف.",
+  "Saved to your history without a rating change.": "تحفظات فالسجل ديالك بلا ما يتبدل التصنيف.",
 };
 
 export default dict;

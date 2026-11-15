@@ -444,7 +444,8 @@ function Game({ account, onSignOut }: { account: Account; onSignOut: () => void 
         void ratingApi.start(clampElo(choice.elo ?? DEFAULT_ELO), withCards).then(
           (s) => {
             setTicket(s.ticket);
-            if (s.abandoned) setRatedNote(t("Your last rated game was left unfinished: it counted as a loss ({delta}).", { delta: s.abandoned.delta }));
+            if (!s.rated) setRatedNote(t("This game will be saved without a rating change."));
+            else if (s.abandoned) setRatedNote(t("Your last rated game was left unfinished: it counted as a loss ({delta}).", { delta: s.abandoned.delta }));
             void rating.refresh();
           },
           (err) => setRatedNote(t("This game isn't rated: {v1}", { v1: err instanceof Error ? err.message : "the server couldn't be reached." }))
