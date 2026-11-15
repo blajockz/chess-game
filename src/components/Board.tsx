@@ -1,6 +1,6 @@
 import { t } from "../i18n";
 import "./Board.css";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Square } from "chess.js";
 
 type PromotionPiece = "q" | "r" | "b" | "n";
@@ -36,6 +36,28 @@ const HEAD_HALF = 0.19;
 const START_GAP = 0.3;
 
 type Cell = { square: Square; type: string; color: "w" | "b" } | null;
+
+const SLIDE_MS = 260;
+const SLIDE_EASE = "cubic-bezier(0.33, 0, 0.2, 1)";
+const SLIDE_MAX = 4;
+
+function piecesOf(board: Cell[][]) {
+  const map = new Map<string, string>();
+  for (const row of board) for (const c of row) if (c) map.set(c.square, c.color + c.type);
+  return map;
+}
+
+function distance(a: string, b: string) {
+  return Math.abs(a.charCodeAt(0) - b.charCodeAt(0)) + Math.abs(Number(a[1]) - Number(b[1]));
+}
+
+function reducedMotion() {
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
 
 export type BoardProps = Props;
 
@@ -93,6 +115,8 @@ export default function Board({
   const [marks, setMarks] = useState<Square[]>([]);
   const dragFrom = useRef<Square | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
+  const shown = useRef<Map<string, string> | null>(null);
+  const droppedOn = useRef<Square | null>(null);
   const [drag, setDrag] = useState<{
     square: Square;
     type: string;
@@ -114,6 +138,53 @@ export default function Board({
     window.addEventListener("pointerup", drop);
     return () => window.removeEventListener("pointerup", drop);
   }, []);
+
+  useLayoutEffect(() => {
+    const before = shown.current;
+    const after = piecesOf(board);
+    shown.current = after;
+    const dropped = droppedOn.current;
+    droppedOn.current = null;
+    const root = boardRef.current;
+    if (!before || !root || reducedMotion()) return;
+    const added: [string, string][] = [];
+    const removed: [string, string][] = [];
+    for (const [sq, code] of after) if (before.get(sq) !== code) added.push([sq, code]);
+    for (const [sq, code] of before) if (after.get(sq) !== code) removed.push([sq, code]);
+    if (!added.length || added.length > SLIDE_MAX || removed.length > SLIDE_MAX + 1) return;
+    const squareEl = (sq: string) => root.querySelector<HTMLElement>(`.sq[aria-label="${sq}"]`);
+    const free = [...removed];
+    for (const [to, code] of added) {
+      const piece = squareEl(to)?.querySelector<HTMLElement>(".piece");
+      if (!piece) continue;
+      let best = -1;
+      for (let i = 0; i < free.length; i++) {
+        if (free[i][1] !== code) continue;
+        if (best === -1 || distance(free[i][0], to) < distance(free[best][0], to)) best = i;
+      }
+      if (best === -1) {
+        piece.animate([{ opacity: 0 }, { opacity: 1 }], { duration: SLIDE_MS, easing: "ease-out" });
+        continue;
+      }
+      const from = free.splice(best, 1)[0][0];
+      if (to === dropped) continue;
+      const a = squareEl(from)?.getBoundingClientRect();
+      const b = squareEl(to)?.getBoundingClientRect();
+      if (!a || !b) continue;
+      piece.style.position = "relative";
+      piece.style.zIndex = "20";
+      const slide = piece.animate(
+        [{ transform: `translate(${a.left - b.left}px, ${a.top - b.top}px)` }, { transform: "translate(0, 0)" }],
+        { duration: SLIDE_MS, easing: SLIDE_EASE }
+      );
+      const done = () => {
+        piece.style.position = "";
+        piece.style.zIndex = "";
+      };
+      slide.onfinish = done;
+      slide.oncancel = done;
+    }
+  }, [board]);
 
   function endDrag(to: Square) {
     const from = dragFrom.current;
@@ -157,6 +228,7 @@ export default function Board({
       setDrag(null);
 
       if (target && target !== drag.square) {
+        droppedOn.current = target;
         onSquareClick(target);
         return;
       }
