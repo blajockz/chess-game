@@ -32,7 +32,7 @@ export default function TopBar({
     <header className="topbar">
       <div className="identity">
         <img className="mark" src="/favicon.svg" alt="" width={34} height={34} />
-        <span className="wordmark">{t("Tempo")}</span>
+        <span className="wordmark">{t("Shatranj")}</span>
       </div>
 
       <div className="modes" role="group" aria-label={t("Game mode")}>
